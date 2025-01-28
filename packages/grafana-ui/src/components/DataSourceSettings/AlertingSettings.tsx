@@ -1,30 +1,41 @@
-import { DataSourcePluginOptionsEditorProps } from '@grafana/data';
-import React from 'react';
-import { Switch } from '../Forms/Legacy/Switch/Switch';
+import { DataSourceJsonData, DataSourcePluginOptionsEditorProps } from '@grafana/data';
 
-type Props<T> = Pick<DataSourcePluginOptionsEditorProps<T>, 'options' | 'onOptionsChange'>;
+import { InlineSwitch } from '../../components/Switch/Switch';
+import { Trans } from '../../utils/i18n';
+import { InlineField } from '../Forms/InlineField';
 
-export function AlertingSettings<T extends { manageAlerts?: boolean }>({
-  options,
-  onOptionsChange,
-}: Props<T>): JSX.Element {
+export interface Props<T extends DataSourceJsonData>
+  extends Pick<DataSourcePluginOptionsEditorProps<T>, 'options' | 'onOptionsChange'> {}
+
+export interface AlertingConfig extends DataSourceJsonData {
+  manageAlerts?: boolean;
+}
+
+export function AlertingSettings<T extends AlertingConfig>({ options, onOptionsChange }: Props<T>): JSX.Element {
   return (
     <>
-      <h3 className="page-heading">Alerting</h3>
+      <h3 className="page-heading">
+        <Trans i18nKey="grafana-ui.data-source-settings.alerting-settings-heading">Alerting</Trans>
+      </h3>
       <div className="gf-form-group">
         <div className="gf-form-inline">
           <div className="gf-form">
-            <Switch
-              label="Manage alerts via Alerting UI"
-              labelClass="width-13"
-              checked={options.jsonData.manageAlerts !== false}
-              onChange={(event) =>
-                onOptionsChange({
-                  ...options,
-                  jsonData: { ...options.jsonData, manageAlerts: event!.currentTarget.checked },
-                })
-              }
-            />
+            <InlineField
+              labelWidth={29}
+              label="Manage alert rules in Alerting UI"
+              disabled={options.readOnly}
+              tooltip="Manage alert rules for this data source. To manage other alerting resources, add an Alertmanager data source."
+            >
+              <InlineSwitch
+                value={options.jsonData.manageAlerts !== false}
+                onChange={(event) =>
+                  onOptionsChange({
+                    ...options,
+                    jsonData: { ...options.jsonData, manageAlerts: event!.currentTarget.checked },
+                  })
+                }
+              />
+            </InlineField>
           </div>
         </div>
       </div>

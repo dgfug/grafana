@@ -1,16 +1,18 @@
-import React, { useState, useCallback, ChangeEvent, FunctionComponent } from 'react';
-import SliderComponent from 'rc-slider';
 import { cx } from '@emotion/css';
 import { Global } from '@emotion/react';
-import { useTheme2 } from '../../themes/ThemeContext';
+import SliderComponent from 'rc-slider';
+import { useState, useCallback, ChangeEvent, FocusEvent } from 'react';
+
+import { useStyles2 } from '../../themes/ThemeContext';
+import { Input } from '../Input/Input';
+
 import { getStyles } from './styles';
 import { SliderProps } from './types';
-import { Input } from '../Input/Input';
 
 /**
  * @public
  */
-export const Slider: FunctionComponent<SliderProps> = ({
+export const Slider = ({
   min,
   max,
   onChange,
@@ -19,20 +21,21 @@ export const Slider: FunctionComponent<SliderProps> = ({
   reverse,
   step,
   value,
-}) => {
+  ariaLabelForHandle,
+  marks,
+  included,
+}: SliderProps) => {
   const isHorizontal = orientation === 'horizontal';
-  const theme = useTheme2();
-  const styles = getStyles(theme, isHorizontal);
+  const styles = useStyles2(getStyles, isHorizontal, Boolean(marks));
   const SliderWithTooltip = SliderComponent;
-  const [sliderValue, setSliderValue] = useState<number>(value || min);
+  const [sliderValue, setSliderValue] = useState<number>(value ?? min);
 
   const onSliderChange = useCallback(
-    (v: number) => {
-      setSliderValue(v);
+    (v: number | number[]) => {
+      const value = typeof v === 'number' ? v : v[0];
 
-      if (onChange) {
-        onChange(v);
-      }
+      setSliderValue(value);
+      onChange?.(value);
     },
     [setSliderValue, onChange]
   );
@@ -45,9 +48,6 @@ export const Slider: FunctionComponent<SliderProps> = ({
         v = 0;
       }
 
-      v > max && (v = max);
-      v < min && (v = min);
-
       setSliderValue(v);
 
       if (onChange) {
@@ -58,7 +58,30 @@ export const Slider: FunctionComponent<SliderProps> = ({
         onAfterChange(v);
       }
     },
-    [max, min, onChange, onAfterChange]
+    [onChange, onAfterChange]
+  );
+
+  // Check for min/max on input blur so user is able to enter
+  // custom values that might seem above/below min/max on first keystroke
+  const onSliderInputBlur = useCallback(
+    (e: FocusEvent<HTMLInputElement>) => {
+      const v = +e.target.value;
+
+      if (v > max) {
+        setSliderValue(max);
+      } else if (v < min) {
+        setSliderValue(min);
+      }
+    },
+    [max, min]
+  );
+
+  const handleChangeComplete = useCallback(
+    (v: number | number[]) => {
+      const value = typeof v === 'number' ? v : v[0];
+      onAfterChange?.(value);
+    },
+    [onAfterChange]
   );
 
   const sliderInputClassNames = !isHorizontal ? [styles.sliderInputVertical] : [];
@@ -68,7 +91,7 @@ export const Slider: FunctionComponent<SliderProps> = ({
     <div className={cx(styles.container, styles.slider)}>
       {/** Slider tooltip's parent component is body and therefore we need Global component to do css overrides for it. */}
       <Global styles={styles.tooltip} />
-      <label className={cx(styles.sliderInput, ...sliderInputClassNames)}>
+      <div className={cx(styles.sliderInput, ...sliderInputClassNames)}>
         <SliderWithTooltip
           min={min}
           max={max}
@@ -76,20 +99,24 @@ export const Slider: FunctionComponent<SliderProps> = ({
           defaultValue={value}
           value={sliderValue}
           onChange={onSliderChange}
-          onAfterChange={onAfterChange}
+          onChangeComplete={handleChangeComplete}
           vertical={!isHorizontal}
           reverse={reverse}
+          ariaLabelForHandle={ariaLabelForHandle}
+          marks={marks}
+          included={included}
         />
-        {/* Uses text input so that the number spinners are not shown */}
+
         <Input
           type="text"
           className={cx(styles.sliderInputField, ...sliderInputFieldClassNames)}
-          value={`${sliderValue}`} // to fix the react leading zero issue
+          value={sliderValue}
           onChange={onSliderInputChange}
+          onBlur={onSliderInputBlur}
           min={min}
           max={max}
         />
-      </label>
+      </div>
     </div>
   );
 };

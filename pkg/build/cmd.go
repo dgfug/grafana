@@ -5,30 +5,37 @@ import (
 	"flag"
 	"fmt"
 	"go/build"
-	"io/ioutil"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/urfave/cli/v2"
 )
 
 const (
 	GoOSWindows = "windows"
 	GoOSLinux   = "linux"
 
-	ServerBinary = "grafana-server"
-	CLIBinary    = "grafana-cli"
+	BackendBinary = "grafana"
+	ServerBinary  = "grafana-server"
+	CLIBinary     = "grafana-cli"
 )
 
-var binaries = []string{ServerBinary, CLIBinary}
+var binaries = []string{BackendBinary, ServerBinary, CLIBinary}
 
 func logError(message string, err error) int {
 	log.Println(message, err)
 
 	return 1
+}
+
+func RunCmdCLI(c *cli.Context) error {
+	os.Exit(RunCmd())
+
+	return nil
 }
 
 // RunCmd runs the build command and returns the exit code
@@ -66,6 +73,16 @@ func RunCmd() int {
 		case "setup":
 			setup(opts.goos)
 
+		case "build-backend":
+			if !opts.isDev {
+				clean(opts)
+			}
+
+			if err := doBuild("grafana", "./pkg/cmd/grafana", opts); err != nil {
+				log.Println(err)
+				return 1
+			}
+
 		case "build-srv", "build-server":
 			if !opts.isDev {
 				clean(opts)
@@ -102,9 +119,6 @@ func RunCmd() int {
 				return logError("error packaging dist directory", err)
 			}
 
-		case "latest":
-			makeLatestDistCopies()
-
 		case "clean":
 			clean(opts)
 
@@ -115,35 +129,6 @@ func RunCmd() int {
 	}
 
 	return 0
-}
-
-func makeLatestDistCopies() {
-	files, err := ioutil.ReadDir("dist")
-	if err != nil {
-		log.Fatalf("failed to create latest copies. Cannot read from /dist")
-	}
-
-	latestMapping := map[string]string{
-		"_amd64.deb":               "dist/grafana_latest_amd64.deb",
-		".x86_64.rpm":              "dist/grafana-latest-1.x86_64.rpm",
-		".linux-amd64.tar.gz":      "dist/grafana-latest.linux-x64.tar.gz",
-		".linux-amd64-musl.tar.gz": "dist/grafana-latest.linux-x64-musl.tar.gz",
-		".linux-armv7.tar.gz":      "dist/grafana-latest.linux-armv7.tar.gz",
-		".linux-armv7-musl.tar.gz": "dist/grafana-latest.linux-armv7-musl.tar.gz",
-		".linux-armv6.tar.gz":      "dist/grafana-latest.linux-armv6.tar.gz",
-		".linux-arm64.tar.gz":      "dist/grafana-latest.linux-arm64.tar.gz",
-		".linux-arm64-musl.tar.gz": "dist/grafana-latest.linux-arm64-musl.tar.gz",
-	}
-
-	for _, file := range files {
-		for extension, fullName := range latestMapping {
-			if strings.HasSuffix(file.Name(), extension) {
-				if _, err := runError("cp", path.Join("dist", file.Name()), fullName); err != nil {
-					log.Println("error running cp command:", err)
-				}
-			}
-		}
-	}
 }
 
 func yarn(params ...string) {
@@ -169,6 +154,11 @@ func setup(goos string) {
 
 func doBuild(binaryName, pkg string, opts BuildOpts) error {
 	log.Println("building", binaryName, pkg)
+
+	if err := setBuildEnv(opts); err != nil {
+		return err
+	}
+
 	libcPart := ""
 	if opts.libc != "" {
 		libcPart = fmt.Sprintf("-%s", opts.libc)
@@ -217,9 +207,6 @@ func doBuild(binaryName, pkg string, opts BuildOpts) error {
 		return nil
 	}
 
-	if err := setBuildEnv(opts); err != nil {
-		return err
-	}
 	runPrint("go", "version")
 	libcPart = ""
 	if opts.libc != "" {
@@ -238,12 +225,32 @@ func ldflags(opts BuildOpts) (string, error) {
 		return "", err
 	}
 
+	commitSha := getGitSha()
+	if v := os.Getenv("COMMIT_SHA"); v != "" {
+		commitSha = v
+	}
+
+	var enterpriseCommitSha string
+	if opts.enterprise {
+		enterpriseCommitSha = getGitEnterpriseSha()
+		if v := os.Getenv("ENTERPRISE_COMMIT_SHA"); v != "" {
+			enterpriseCommitSha = v
+		}
+	}
+
+	buildBranch := getGitBranch()
+	if v := os.Getenv("BUILD_BRANCH"); v != "" {
+		buildBranch = v
+	}
 	var b bytes.Buffer
 	b.WriteString("-w")
 	b.WriteString(fmt.Sprintf(" -X main.version=%s", opts.version))
-	b.WriteString(fmt.Sprintf(" -X main.commit=%s", getGitSha()))
+	b.WriteString(fmt.Sprintf(" -X main.commit=%s", commitSha))
+	if enterpriseCommitSha != "" {
+		b.WriteString(fmt.Sprintf(" -X main.enterpriseCommit=%s", enterpriseCommitSha))
+	}
 	b.WriteString(fmt.Sprintf(" -X main.buildstamp=%d", buildStamp))
-	b.WriteString(fmt.Sprintf(" -X main.buildBranch=%s", getGitBranch()))
+	b.WriteString(fmt.Sprintf(" -X main.buildBranch=%s", buildBranch))
 	if v := os.Getenv("LDFLAGS"); v != "" {
 		b.WriteString(fmt.Sprintf(" -extldflags \"%s\"", v))
 	}

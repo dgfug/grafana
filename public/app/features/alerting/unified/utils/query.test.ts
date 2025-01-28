@@ -1,8 +1,10 @@
 import { DataSourceJsonData, PluginMeta } from '@grafana/data';
-import { alertRuleToQueries } from './query';
-import { GRAFANA_RULES_SOURCE_NAME } from './datasource';
+import { ExpressionDatasourceUID } from 'app/features/expressions/types';
 import { CombinedRule } from 'app/types/unified-alerting';
 import { GrafanaAlertStateDecision } from 'app/types/unified-alerting-dto';
+
+import { GRAFANA_RULES_SOURCE_NAME } from './datasource';
+import { alertRuleToQueries } from './query';
 
 describe('alertRuleToQueries', () => {
   it('it should convert grafana alert', () => {
@@ -14,6 +16,7 @@ describe('alertRuleToQueries', () => {
       group: {
         name: 'Prom up alert',
         rules: [],
+        totals: {},
       },
       namespace: {
         rulesSource: GRAFANA_RULES_SOURCE_NAME,
@@ -26,6 +29,8 @@ describe('alertRuleToQueries', () => {
         labels: {},
         grafana_alert: grafanaAlert,
       },
+      instanceTotals: {},
+      filteredInstanceTotals: {},
     };
 
     const result = alertRuleToQueries(combinedRule);
@@ -41,6 +46,7 @@ describe('alertRuleToQueries', () => {
       group: {
         name: 'test',
         rules: [],
+        totals: {},
       },
       namespace: {
         name: 'prom test alerts',
@@ -53,8 +59,11 @@ describe('alertRuleToQueries', () => {
           access: 'proxy',
           meta: {} as PluginMeta,
           jsonData: {} as DataSourceJsonData,
+          readOnly: false,
         },
       },
+      instanceTotals: {},
+      filteredInstanceTotals: {},
     };
 
     const result = alertRuleToQueries(combinedRule);
@@ -79,8 +88,8 @@ describe('alertRuleToQueries', () => {
 const grafanaAlert = {
   condition: 'B',
   exec_err_state: GrafanaAlertStateDecision.Alerting,
-  namespace_id: 11,
   namespace_uid: 'namespaceuid123',
+  rule_group: 'my-group',
   no_data_state: GrafanaAlertStateDecision.NoData,
   title: 'Test alert',
   uid: 'asdf23',
@@ -99,7 +108,7 @@ const grafanaAlert = {
       refId: 'B',
       queryType: '',
       relativeTimeRange: { from: 0, to: 0 },
-      datasourceUid: '-100',
+      datasourceUid: '__expr__',
       model: {
         conditions: [
           {
@@ -110,7 +119,9 @@ const grafanaAlert = {
             type: 'query',
           },
         ],
-        datasource: '__expr__',
+        datasource: {
+          uid: ExpressionDatasourceUID,
+        },
         hide: false,
         refId: 'B',
         type: 'classic_conditions',

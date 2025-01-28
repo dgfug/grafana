@@ -12,32 +12,83 @@ import (
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/middleware"
-	"github.com/grafana/grafana/pkg/models"
+	"github.com/grafana/grafana/pkg/middleware/requestmeta"
+	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/ngalert/metrics"
+	"github.com/grafana/grafana/pkg/web"
 )
 
-type PrometheusApiService interface {
-	RouteGetAlertStatuses(*models.ReqContext) response.Response
-	RouteGetRuleStatuses(*models.ReqContext) response.Response
+type PrometheusApi interface {
+	RouteGetAlertStatuses(*contextmodel.ReqContext) response.Response
+	RouteGetGrafanaAlertStatuses(*contextmodel.ReqContext) response.Response
+	RouteGetGrafanaRuleStatuses(*contextmodel.ReqContext) response.Response
+	RouteGetRuleStatuses(*contextmodel.ReqContext) response.Response
 }
 
-func (api *API) RegisterPrometheusApiEndpoints(srv PrometheusApiService, m *metrics.API) {
+func (f *PrometheusApiHandler) RouteGetAlertStatuses(ctx *contextmodel.ReqContext) response.Response {
+	// Parse Path Parameters
+	datasourceUIDParam := web.Params(ctx.Req)[":DatasourceUID"]
+	return f.handleRouteGetAlertStatuses(ctx, datasourceUIDParam)
+}
+func (f *PrometheusApiHandler) RouteGetGrafanaAlertStatuses(ctx *contextmodel.ReqContext) response.Response {
+	return f.handleRouteGetGrafanaAlertStatuses(ctx)
+}
+func (f *PrometheusApiHandler) RouteGetGrafanaRuleStatuses(ctx *contextmodel.ReqContext) response.Response {
+	return f.handleRouteGetGrafanaRuleStatuses(ctx)
+}
+func (f *PrometheusApiHandler) RouteGetRuleStatuses(ctx *contextmodel.ReqContext) response.Response {
+	// Parse Path Parameters
+	datasourceUIDParam := web.Params(ctx.Req)[":DatasourceUID"]
+	return f.handleRouteGetRuleStatuses(ctx, datasourceUIDParam)
+}
+
+func (api *API) RegisterPrometheusApiEndpoints(srv PrometheusApi, m *metrics.API) {
 	api.RouteRegister.Group("", func(group routing.RouteRegister) {
 		group.Get(
-			toMacaronPath("/api/prometheus/{Recipient}/api/v1/alerts"),
+			toMacaronPath("/api/prometheus/{DatasourceUID}/api/v1/alerts"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodGet, "/api/prometheus/{DatasourceUID}/api/v1/alerts"),
 			metrics.Instrument(
 				http.MethodGet,
-				"/api/prometheus/{Recipient}/api/v1/alerts",
-				srv.RouteGetAlertStatuses,
+				"/api/prometheus/{DatasourceUID}/api/v1/alerts",
+				api.Hooks.Wrap(srv.RouteGetAlertStatuses),
 				m,
 			),
 		)
 		group.Get(
-			toMacaronPath("/api/prometheus/{Recipient}/api/v1/rules"),
+			toMacaronPath("/api/prometheus/grafana/api/v1/alerts"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodGet, "/api/prometheus/grafana/api/v1/alerts"),
 			metrics.Instrument(
 				http.MethodGet,
-				"/api/prometheus/{Recipient}/api/v1/rules",
-				srv.RouteGetRuleStatuses,
+				"/api/prometheus/grafana/api/v1/alerts",
+				api.Hooks.Wrap(srv.RouteGetGrafanaAlertStatuses),
+				m,
+			),
+		)
+		group.Get(
+			toMacaronPath("/api/prometheus/grafana/api/v1/rules"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodGet, "/api/prometheus/grafana/api/v1/rules"),
+			metrics.Instrument(
+				http.MethodGet,
+				"/api/prometheus/grafana/api/v1/rules",
+				api.Hooks.Wrap(srv.RouteGetGrafanaRuleStatuses),
+				m,
+			),
+		)
+		group.Get(
+			toMacaronPath("/api/prometheus/{DatasourceUID}/api/v1/rules"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodGet, "/api/prometheus/{DatasourceUID}/api/v1/rules"),
+			metrics.Instrument(
+				http.MethodGet,
+				"/api/prometheus/{DatasourceUID}/api/v1/rules",
+				api.Hooks.Wrap(srv.RouteGetRuleStatuses),
 				m,
 			),
 		)

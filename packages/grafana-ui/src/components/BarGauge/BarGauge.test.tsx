@@ -1,5 +1,5 @@
-import React from 'react';
-import { shallow } from 'enzyme';
+import { render } from '@testing-library/react';
+
 import {
   DisplayValue,
   VizOrientation,
@@ -10,17 +10,18 @@ import {
   getDisplayProcessor,
   createTheme,
 } from '@grafana/data';
+import { BarGaugeDisplayMode, BarGaugeNamePlacement, BarGaugeValueMode } from '@grafana/schema';
+
 import {
   BarGauge,
   Props,
-  getCellColor,
-  getValueColor,
+  getTextValueColor,
   getBasicAndGradientStyles,
   getBarGradient,
   getTitleStyles,
   getValuePercent,
-  BarGaugeDisplayMode,
   calculateBarAndValueDimensions,
+  getCellColor,
 } from './BarGauge';
 
 const green = '#73BF69';
@@ -54,25 +55,15 @@ function getProps(propOverrides?: Partial<Props>): Props {
     value: field.display(25),
     theme,
     orientation: VizOrientation.Horizontal,
+    namePlacement: BarGaugeNamePlacement.Auto,
   };
 
   Object.assign(props, propOverrides);
   return props;
 }
 
-const setup = (propOverrides?: object) => {
-  const props = getProps(propOverrides);
-  const wrapper = shallow(<BarGauge {...props} />);
-  const instance = wrapper.instance() as BarGauge;
-
-  return {
-    instance,
-    wrapper,
-  };
-};
-
 function getValue(value: number, title?: string): DisplayValue {
-  return { numeric: value, text: value.toString(), title: title };
+  return { numeric: value, text: value.toString(), title: title, color: '#FF0000' };
 }
 
 describe('BarGauge', () => {
@@ -87,7 +78,7 @@ describe('BarGauge', () => {
 
     it('does not show as lit if the value is null (somehow)', () => {
       const props = getProps();
-      expect(getCellColor(1, (null as unknown) as DisplayValue, props.display)).toEqual(
+      expect(getCellColor(1, null as unknown as DisplayValue, props.display)).toEqual(
         expect.objectContaining({
           isLit: false,
         })
@@ -143,12 +134,12 @@ describe('BarGauge', () => {
     it('should get the threshold color if value is same as a threshold', () => {
       const props = getProps();
       props.value = props.display!(70);
-      expect(getValueColor(props)).toEqual(orange);
+      expect(getTextValueColor(props)).toEqual(orange);
     });
     it('should get the base threshold', () => {
       const props = getProps();
       props.value = props.display!(-10);
-      expect(getValueColor(props)).toEqual(green);
+      expect(getTextValueColor(props)).toEqual(green);
     });
   });
 
@@ -167,6 +158,22 @@ describe('BarGauge', () => {
 
     it('-30 to 30 and value 30', () => {
       expect(getValuePercent(30, -30, 30)).toEqual(1);
+    });
+
+    it('returns 0 if the min, max and value are all the same value', () => {
+      expect(getValuePercent(25, 25, 25)).toEqual(0);
+    });
+  });
+
+  describe('Vertical bar', () => {
+    it('should adjust empty region to always have same width as colored bar', () => {
+      const props = getProps({
+        width: 150,
+        value: getValue(100),
+        orientation: VizOrientation.Vertical,
+      });
+      const styles = getBasicAndGradientStyles(props);
+      expect(styles.emptyBar.width).toBe('150px');
     });
   });
 
@@ -218,9 +225,29 @@ describe('BarGauge', () => {
       const styles = getTitleStyles(props);
       expect(styles.wrapper.flexDirection).toBe('column');
     });
-  });
 
-  describe('Horizontal bar with title', () => {
+    it('should place left even if height > 40 if name placement is set to left', () => {
+      const props = getProps({
+        height: 41,
+        value: getValue(100, 'AA'),
+        orientation: VizOrientation.Horizontal,
+        namePlacement: BarGaugeNamePlacement.Left,
+      });
+      const styles = getTitleStyles(props);
+      expect(styles.wrapper.flexDirection).toBe('row');
+    });
+
+    it('should place above even if height < 40 if name placement is set to top', () => {
+      const props = getProps({
+        height: 39,
+        value: getValue(100, 'AA'),
+        orientation: VizOrientation.Horizontal,
+        namePlacement: BarGaugeNamePlacement.Top,
+      });
+      const styles = getTitleStyles(props);
+      expect(styles.wrapper.flexDirection).toBe('column');
+    });
+
     it('should place below if height < 40', () => {
       const props = getProps({
         height: 30,
@@ -249,6 +276,19 @@ describe('BarGauge', () => {
       expect(styles2.title.width).toBe('43px');
     });
 
+    it('Should limit text length to 40%', () => {
+      const props = getProps({
+        height: 30,
+        value: getValue(
+          100,
+          'saaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        ),
+        orientation: VizOrientation.Horizontal,
+      });
+      const styles = getTitleStyles(props);
+      expect(styles.title.width).toBe('119px');
+    });
+
     it('should use alignmentFactors if provided', () => {
       const props = getProps({
         height: 30,
@@ -261,6 +301,16 @@ describe('BarGauge', () => {
       });
       const styles = getTitleStyles(props);
       expect(styles.title.width).toBe('37px');
+    });
+
+    it('should adjust empty region to always have same height as colored bar', () => {
+      const props = getProps({
+        height: 150,
+        value: getValue(100),
+        orientation: VizOrientation.Horizontal,
+      });
+      const styles = getBasicAndGradientStyles(props);
+      expect(styles.emptyBar.height).toBe('150px');
     });
   });
 
@@ -280,8 +330,8 @@ describe('BarGauge', () => {
 
   describe('Render with basic options', () => {
     it('should render', () => {
-      const { wrapper } = setup();
-      expect(wrapper).toMatchSnapshot();
+      const props = getProps();
+      expect(() => render(<BarGauge {...props} />)).not.toThrow();
     });
   });
 
@@ -296,6 +346,47 @@ describe('BarGauge', () => {
         })
       );
       expect(result.valueWidth).toBe(21);
+    });
+
+    it('valueWidth be zero if valueMode is hideen', () => {
+      const result = calculateBarAndValueDimensions(
+        getProps({
+          height: 30,
+          width: 100,
+          value: getValue(1, 'AA'),
+          orientation: VizOrientation.Horizontal,
+          valueDisplayMode: BarGaugeValueMode.Hidden,
+        })
+      );
+      expect(result.valueWidth).toBe(0);
+    });
+  });
+
+  describe('With valueMode set to text color', () => {
+    it('should color value using text color', () => {
+      const props = getProps({
+        width: 150,
+        value: getValue(100),
+        orientation: VizOrientation.Vertical,
+        valueDisplayMode: BarGaugeValueMode.Text,
+      });
+      const styles = getBasicAndGradientStyles(props);
+      expect(styles.bar.background).toBe('rgba(255, 0, 0, 0.35)');
+      expect(styles.value.color).toBe('rgb(204, 204, 220)');
+    });
+  });
+
+  describe('With valueMode set to text value', () => {
+    it('should color value value color', () => {
+      const props = getProps({
+        width: 150,
+        value: getValue(100),
+        orientation: VizOrientation.Vertical,
+        valueDisplayMode: BarGaugeValueMode.Color,
+      });
+      const styles = getBasicAndGradientStyles(props);
+      expect(styles.bar.background).toBe('rgba(255, 0, 0, 0.35)');
+      expect(styles.value.color).toBe('#FF0000');
     });
   });
 });

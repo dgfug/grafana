@@ -1,31 +1,62 @@
-+++
-title = "Alerts"
-weight = 110
-+++
+---
+aliases:
+  - about-alerting/ # /docs/grafana/<GRAFANA_VERSION>/about-alerting
+  - ./unified-alerting/alerting/ # /docs/grafana/<GRAFANA_VERSION>/unified-alerting/alerting/
+  - ./alerting/unified-alerting/ # /docs/grafana/<GRAFANA_VERSION>/alerting/unified-alerting/
+canonical: https://grafana.com/docs/grafana/latest/alerting/
+description: Learn about the key benefits and features of Grafana Alerting
+labels:
+  products:
+    - cloud
+    - enterprise
+    - oss
+menuTitle: Alerting
+title: Grafana Alerting
+weight: 114
+hero:
+  title: Grafana Alerting
+  level: 1
+  image: /media/docs/grafana-cloud/alerting-and-irm/grafana-icon-alerting.svg
+  width: 100
+  height: 100
+  description: Grafana Alerting allows you to learn about problems in your systems moments after they occur.
+cards:
+  title_class: pt-0 lh-1
+  items:
+    - title: Introduction
+      href: ./fundamentals/
+      description: Learn more about the fundamentals and available features that help you create, manage, and respond to alerts; and improve your team’s ability to resolve issues quickly.
+      height: 24
+    - title: Configure alert rules
+      href: ./alerting-rules/
+      description: Create, manage, view, and adjust alert rules to alert on your metrics data or log entries from multiple data sources — no matter where your data is stored.
+      height: 24
+    - title: Configure notifications
+      href: ./configure-notifications/
+      description: Choose how, when, and where to send your alert notifications.
+      height: 24
+    - title: Monitor status
+      href: ./monitor-status/
+      description: Monitor, respond to, and triage issues within your services.
+      height: 24
+    - title: Additional configuration
+      href: ./set-up/
+      description: Use advanced configuration options to further tailor your alerting setup. These options can enhance security, scalability, and automation in complex environments.
+      height: 24
+---
 
-# Grafana alerts
+{{< docs/hero-simple key="hero" >}}
 
-Alerts allow you to know about problems in your systems moments after they occur. Robust and actionable alerts help you identify and resolve issues quickly, minimizing disruption to your services.
+---
 
-Grafana 8.0 has new and improved alerts that centralizes alerting information for Grafana managed alerts as well as alerts from Prometheus-compatible data sources into one user interface and API.
+## Overview
 
-> **Note:** Grafana 8 alerts is an [opt-in]({{< relref "./unified-alerting/opt-in.md" >}}) feature. Out of the box, Grafana still supports old [legacy dashboard alerts]({{< relref "./old-alerting/_index.md" >}}). We encourage you to create issues in the Grafana GitHub repository for bugs found while testing Grafana 8 alerts.
+Monitor your incoming metrics data or log entries and set up your Grafana Alerting system to watch for specific events or circumstances.
 
-Alerts have four main components:
+In this way, you eliminate the need for manual monitoring and provide a first line of defense against system outages or changes that could turn into major incidents.
 
-- Alerting rule - One or more query and/or expression, a condition, the frequency of evaluation, and the (optional) duration that a condition must be met before creating an alert.
-- Contact point - A channel for sending notifications when the conditions of an alerting rule are met.
-- Notification policy - A set of matching and grouping criteria used to determine where, and how frequently, to send notifications.
-- Silences - Date and matching criteria used to silence notifications.
+Using Grafana Alerting, you create queries and expressions from multiple data sources — no matter where your data is stored — giving you the flexibility to combine your data and alert on your metrics and logs in new and unique ways. You can then create, manage, and take action on your alerts from a single, consolidated view, and improve your team’s ability to identify and resolve issues quickly.
 
-You can create and edit alerting rules for Grafana managed alerts, Cortex alerts, and Loki alerts as well as see alerting information from prometheus-compatible data sources in a single, searchable view. For more information, on how to create and edit alerts and notifications, refer to [Overview of Grafana 8.0 alerts]({{< relref "../alerting/unified-alerting/_index.md" >}}).
+## Explore
 
-For handling notifications for Grafana managed alerts, we use an embedded Alertmanager. You can configure its contact points, notification policies, silences and templates from the new Grafana alerting UI by selecting `Grafana` from the Alertmanager dropdown on the top of the respective tab.
-
-> **Note:** Currently the configuration of this embedded Alertmanager is shared across organisations. Therefore users are advised to use the new Grafana 8 Alerts only if they have one organisation otherwise all contact points, notification policies, silences and templates for Grafana managed alerts will be visible by all organizations.
-
-As part of the new alert changes, we have introduced a new data source, Alertmanager, which includes built-in support for Prometheus Alertmanager. It is presently in alpha and it not accessible unless alpha plugins are enabled in Grafana settings. For more information, refer to [Alertmanager data source]({{< relref "../datasources/alertmanager.md" >}}). If such a data source is present, then you can view and modify its silences, contact points and notification policies from the Grafana alerting UI by selecting it from the Alertmanager dropdown on the top of respective tab.
-
-> **Note:** Out of the box, Grafana still supports old Grafana alerts. They are legacy alerts at this time, and will be deprecated in a future release. For more information, refer to [Legacy Grafana alerts]({{< relref "./old-alerting/_index.md" >}}).
-
-To learn more about the differences between new alerts and the legacy alerts, refer to [What's New with Grafana 8 Alerts]({{< relref "../alerting/difference-old-new.md" >}}).
+{{< card-grid key="cards" type="simple" >}}
