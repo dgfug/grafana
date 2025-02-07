@@ -1,5 +1,6 @@
 import $ from 'jquery';
-import coreModule from '../core/core_module';
+
+import coreModule from './core_module';
 
 function getBlockNodes(nodes: any[]) {
   let node = nodes[0];
@@ -21,7 +22,8 @@ function getBlockNodes(nodes: any[]) {
   return blockNodes || nodes;
 }
 
-/** @ngInject */
+coreModule.directive('rebuildOnChange', ['$animate', rebuildOnChange]);
+
 function rebuildOnChange($animate: any) {
   return {
     multiElement: true,
@@ -69,5 +71,3 @@ function rebuildOnChange($animate: any) {
     },
   };
 }
-
-coreModule.directive('rebuildOnChange', rebuildOnChange);

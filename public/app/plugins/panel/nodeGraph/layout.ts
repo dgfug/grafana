@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { EdgeDatum, EdgeDatumLayout, NodeDatum } from './types';
-import { Field } from '@grafana/data';
-import { useNodeLimit } from './useNodeLimit';
+import { fromPairs } from 'lodash';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useUnmount } from 'react-use';
 import useMountedState from 'react-use/lib/useMountedState';
+
+import { Field } from '@grafana/data';
+import { config as grafanaConfig } from '@grafana/runtime';
+
+import { createWorker, createMsaglWorker } from './createLayoutWorker';
+import { EdgeDatum, EdgeDatumLayout, NodeDatum } from './types';
+import { useNodeLimit } from './useNodeLimit';
 import { graphBounds } from './utils';
-// @ts-ignore
-import LayoutWorker from './layout.worker.js';
 
 export interface Config {
   linkDistance: number;
@@ -45,7 +49,8 @@ export function useLayout(
   config: Config = defaultConfig,
   nodeCountLimit: number,
   width: number,
-  rootNodeId?: string
+  rootNodeId?: string,
+  hasFixedPositions?: boolean
 ) {
   const [nodesGraph, setNodesGraph] = useState<NodeDatum[]>([]);
   const [edgesGraph, setEdgesGraph] = useState<EdgeDatumLayout[]>([]);
@@ -53,6 +58,13 @@ export function useLayout(
   const [loading, setLoading] = useState(false);
 
   const isMounted = useMountedState();
+  const layoutWorkerCancelRef = useRef<(() => void) | undefined>();
+
+  useUnmount(() => {
+    if (layoutWorkerCancelRef.current) {
+      layoutWorkerCancelRef.current();
+    }
+  });
 
   // Also we compute both layouts here. Grid layout should not add much time and we can more easily just cache both
   // so this should happen only once for a given response data.
@@ -70,22 +82,44 @@ export function useLayout(
     if (rawNodes.length === 0) {
       setNodesGraph([]);
       setEdgesGraph([]);
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (hasFixedPositions) {
+      setNodesGraph(rawNodes);
+      // The layout function turns source and target fields from string to NodeDatum, so we do that here as well.
+      const nodesMap = fromPairs(rawNodes.map((node) => [node.id, node]));
+      setEdgesGraph(
+        rawEdges.map(
+          (e): EdgeDatumLayout => ({
+            ...e,
+            source: nodesMap[e.source],
+            target: nodesMap[e.target],
+          })
+        )
+      );
+      setLoading(false);
+      return;
+    }
 
-    // This is async but as I wanted to still run the sync grid layout and you cannot return promise from effect so
+    // Layered layout is better but also more expensive, so we switch to default force based layout for bigger graphs.
+    const layoutType =
+      grafanaConfig.featureToggles.nodeGraphDotLayout && rawNodes.length <= 500 ? 'layered' : 'default';
+
+    setLoading(true);
+    // This is async but as I wanted to still run the sync grid layout, and you cannot return promise from effect so
     // having callback seems ok here.
-    defaultLayout(rawNodes, rawEdges, ({ nodes, edges }) => {
-      // TODO: it would be better to cancel the worker somehow but probably not super important right now.
+    const cancel = layout(rawNodes, rawEdges, layoutType, ({ nodes, edges }) => {
       if (isMounted()) {
         setNodesGraph(nodes);
-        setEdgesGraph(edges as EdgeDatumLayout[]);
+        setEdgesGraph(edges);
         setLoading(false);
       }
     });
-  }, [rawNodes, rawEdges, isMounted]);
+    layoutWorkerCancelRef.current = cancel;
+    return cancel;
+  }, [hasFixedPositions, rawNodes, rawEdges, isMounted]);
 
   // Compute grid separately as it is sync and do not need to be inside effect. Also it is dependant on width while
   // default layout does not care and we don't want to recalculate that on panel resize.
@@ -103,7 +137,11 @@ export function useLayout(
 
   // Limit the nodes so we don't show all for performance reasons. Here we don't compute both at the same time so
   // changing the layout can trash internal memoization at the moment.
-  const { nodes: nodesWithLimit, edges: edgesWithLimit, markers } = useNodeLimit(
+  const {
+    nodes: nodesWithLimit,
+    edges: edgesWithLimit,
+    markers,
+  } = useNodeLimit(
     config.gridLayout ? nodesGrid : nodesGraph,
     config.gridLayout ? edgesGrid : edgesGraph,
     nodeCountLimit,
@@ -112,10 +150,10 @@ export function useLayout(
   );
 
   // Get bounds based on current limited number of nodes.
-  const bounds = useMemo(() => graphBounds([...nodesWithLimit, ...(markers || []).map((m) => m.node)]), [
-    nodesWithLimit,
-    markers,
-  ]);
+  const bounds = useMemo(
+    () => graphBounds([...nodesWithLimit, ...(markers || []).map((m) => m.node)]),
+    [nodesWithLimit, markers]
+  );
 
   return {
     nodes: nodesWithLimit,
@@ -129,21 +167,27 @@ export function useLayout(
 
 /**
  * Wraps the layout code in a worker as it can take long and we don't want to block the main thread.
+ * Returns a cancel function to terminate the worker.
  */
-function defaultLayout(
+function layout(
   nodes: NodeDatum[],
   edges: EdgeDatum[],
-  done: (data: { nodes: NodeDatum[]; edges: EdgeDatum[] }) => void
+  engine: 'default' | 'layered',
+  done: (data: { nodes: NodeDatum[]; edges: EdgeDatumLayout[] }) => void
 ) {
-  const worker = new LayoutWorker();
+  const worker = engine === 'default' ? createWorker() : createMsaglWorker();
+
   worker.onmessage = (event: MessageEvent<{ nodes: NodeDatum[]; edges: EdgeDatumLayout[] }>) => {
-    for (let i = 0; i < nodes.length; i++) {
-      // These stats needs to be Field class but the data is stringified over the worker boundary
-      event.data.nodes[i] = {
-        ...nodes[i],
-        ...event.data.nodes[i],
+    const nodesMap = fromPairs(nodes.map((node) => [node.id, node]));
+
+    // Add the x,y coordinates from the layout algorithm to the original nodes.
+    event.data.nodes = event.data.nodes.map((node) => {
+      return {
+        ...nodesMap[node.id],
+        ...node,
       };
-    }
+    });
+
     done(event.data);
   };
 
@@ -155,6 +199,10 @@ function defaultLayout(
     edges,
     config: defaultConfig,
   });
+
+  return () => {
+    worker.terminate();
+  };
 }
 
 /**
@@ -176,10 +224,10 @@ function gridLayout(
 
   if (sort) {
     nodes.sort((node1, node2) => {
-      const val1 = sort!.field.values.get(node1.dataFrameRowIndex);
-      const val2 = sort!.field.values.get(node2.dataFrameRowIndex);
+      const val1 = sort!.field.values[node1.dataFrameRowIndex];
+      const val2 = sort!.field.values[node2.dataFrameRowIndex];
 
-      // Lets pretend we don't care about type of the stats for a while (they can be strings)
+      // Let's pretend we don't care about type of the stats for a while (they can be strings)
       return sort!.ascending ? val1 - val2 : val2 - val1;
     });
   }

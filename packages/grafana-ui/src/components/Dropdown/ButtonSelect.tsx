@@ -1,21 +1,35 @@
-import React, { useState, HTMLAttributes } from 'react';
-import { PopoverContent } from '../Tooltip/Tooltip';
-import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { ToolbarButtonVariant, ToolbarButton, ButtonGroup } from '../Button';
-import { ClickOutsideWrapper } from '../ClickOutsideWrapper/ClickOutsideWrapper';
 import { css } from '@emotion/css';
+import {
+  autoUpdate,
+  flip,
+  offset,
+  shift,
+  useClick,
+  useDismiss,
+  useFloating,
+  useInteractions,
+} from '@floating-ui/react';
+import { FocusScope } from '@react-aria/focus';
+import { memo, HTMLAttributes, useState } from 'react';
+
+import { GrafanaTheme2, SelectableValue } from '@grafana/data';
+
 import { useStyles2 } from '../../themes/ThemeContext';
 import { Menu } from '../Menu/Menu';
 import { MenuItem } from '../Menu/MenuItem';
+import { ToolbarButton, ToolbarButtonVariant } from '../ToolbarButton';
+import { PopoverContent } from '../Tooltip';
 
 export interface Props<T> extends HTMLAttributes<HTMLButtonElement> {
   className?: string;
   options: Array<SelectableValue<T>>;
   value?: SelectableValue<T>;
   onChange: (item: SelectableValue<T>) => void;
+  /** @deprecated use tooltip instead, tooltipContent is not being processed in ToolbarButton*/
   tooltipContent?: PopoverContent;
   narrow?: boolean;
   variant?: ToolbarButtonVariant;
+  tooltip?: string;
 }
 
 /**
@@ -24,18 +38,33 @@ export interface Props<T> extends HTMLAttributes<HTMLButtonElement> {
  */
 const ButtonSelectComponent = <T,>(props: Props<T>) => {
   const { className, options, value, onChange, narrow, variant, ...restProps } = props;
-  const [isOpen, setIsOpen] = useState<boolean>(false);
   const styles = useStyles2(getStyles);
+  const [isOpen, setIsOpen] = useState(false);
 
-  const onCloseMenu = () => {
-    setIsOpen(false);
-  };
+  // the order of middleware is important!
+  const middleware = [
+    offset(0),
+    flip({
+      fallbackAxisSideDirection: 'end',
+      // see https://floating-ui.com/docs/flip#combining-with-shift
+      crossAxis: false,
+      boundary: document.body,
+    }),
+    shift(),
+  ];
 
-  const onToggle = (event: React.MouseEvent) => {
-    event.stopPropagation();
-    event.preventDefault();
-    setIsOpen(!isOpen);
-  };
+  const { context, refs, floatingStyles } = useFloating({
+    open: isOpen,
+    placement: 'bottom-end',
+    onOpenChange: setIsOpen,
+    middleware,
+    whileElementsMounted: autoUpdate,
+  });
+
+  const click = useClick(context);
+  const dismiss = useDismiss(context);
+
+  const { getReferenceProps, getFloatingProps } = useInteractions([dismiss, click]);
 
   const onChangeInternal = (item: SelectableValue<T>) => {
     onChange(item);
@@ -43,52 +72,62 @@ const ButtonSelectComponent = <T,>(props: Props<T>) => {
   };
 
   return (
-    <ButtonGroup className={styles.wrapper}>
+    <div className={styles.wrapper}>
       <ToolbarButton
         className={className}
         isOpen={isOpen}
-        onClick={onToggle}
         narrow={narrow}
         variant={variant}
+        ref={refs.setReference}
+        {...getReferenceProps()}
         {...restProps}
       >
-        {value?.label || value?.value}
+        {value?.label || (value?.value != null ? String(value?.value) : null)}
       </ToolbarButton>
       {isOpen && (
-        <div className={styles.menuWrapper}>
-          <ClickOutsideWrapper onClick={onCloseMenu} parent={document}>
-            <Menu>
+        <div className={styles.menuWrapper} ref={refs.setFloating} {...getFloatingProps()} style={floatingStyles}>
+          <FocusScope contain autoFocus restoreFocus>
+            {/*
+              tabIndex=-1 is needed here to support highlighting text within the menu when using FocusScope
+              see https://github.com/adobe/react-spectrum/issues/1604#issuecomment-781574668
+            */}
+            <Menu tabIndex={-1} onClose={() => setIsOpen(false)}>
               {options.map((item) => (
                 <MenuItem
                   key={`${item.value}`}
-                  label={(item.label || item.value) as string}
+                  label={item.label ?? String(item.value)}
                   onClick={() => onChangeInternal(item)}
                   active={item.value === value?.value}
+                  ariaChecked={item.value === value?.value}
+                  ariaLabel={item.ariaLabel || item.label}
+                  disabled={item.isDisabled}
+                  component={item.component}
+                  role="menuitemradio"
                 />
               ))}
             </Menu>
-          </ClickOutsideWrapper>
+          </FocusScope>
         </div>
       )}
-    </ButtonGroup>
+    </div>
   );
 };
 
 ButtonSelectComponent.displayName = 'ButtonSelect';
 
-export const ButtonSelect = React.memo(ButtonSelectComponent) as typeof ButtonSelectComponent;
+// needed to properly forward the generic type through React.memo
+// see https://github.com/DefinitelyTyped/DefinitelyTyped/issues/37087#issuecomment-656596623
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+export const ButtonSelect = memo(ButtonSelectComponent) as typeof ButtonSelectComponent;
 
 const getStyles = (theme: GrafanaTheme2) => {
   return {
-    wrapper: css`
-      position: relative;
-      display: inline-flex;
-    `,
-    menuWrapper: css`
-      position: absolute;
-      z-index: ${theme.zIndex.dropdown};
-      top: ${theme.spacing(4)};
-      right: 0;
-    `,
+    wrapper: css({
+      position: 'relative',
+      display: 'inline-flex',
+    }),
+    menuWrapper: css({
+      zIndex: theme.zIndex.dropdown,
+    }),
   };
 };

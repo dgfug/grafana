@@ -1,23 +1,21 @@
-import React, { PureComponent } from 'react';
 import { saveAs } from 'file-saver';
-import { getBackendSrv } from 'app/core/services/backend_srv';
-import { Button, Field, Modal, Switch } from '@grafana/ui';
-import { DashboardModel, PanelModel } from 'app/features/dashboard/state';
-import { DashboardExporter } from 'app/features/dashboard/components/DashExportModal';
-import { appEvents } from 'app/core/core';
-import { ShowModalReactEvent } from 'app/types/events';
-import { ViewJsonModal } from './ViewJsonModal';
-import { config } from '@grafana/runtime';
+import { PureComponent } from 'react';
 
-interface Props {
-  dashboard: DashboardModel;
-  panel?: PanelModel;
-  onDismiss(): void;
-}
+import { Button, Field, Modal, Switch } from '@grafana/ui';
+import { appEvents } from 'app/core/core';
+import { t, Trans } from 'app/core/internationalization';
+import { DashboardExporter } from 'app/features/dashboard/components/DashExportModal';
+import { DashboardInteractions } from 'app/features/dashboard-scene/utils/interactions';
+import { ShowModalReactEvent } from 'app/types/events';
+
+import { ViewJsonModal } from './ViewJsonModal';
+import { ShareModalTabProps } from './types';
+import { getTrackingSource } from './utils';
+
+interface Props extends ShareModalTabProps {}
 
 interface State {
   shareExternally: boolean;
-  trimDefaults: boolean;
 }
 
 export class ShareExport extends PureComponent<Props, State> {
@@ -27,7 +25,6 @@ export class ShareExport extends PureComponent<Props, State> {
     super(props);
     this.state = {
       shareExternally: false,
-      trimDefaults: false,
     };
 
     this.exporter = new DashboardExporter();
@@ -39,69 +36,38 @@ export class ShareExport extends PureComponent<Props, State> {
     });
   };
 
-  onTrimDefaultsChange = () => {
-    this.setState({
-      trimDefaults: !this.state.trimDefaults,
-    });
-  };
-
   onSaveAsFile = () => {
     const { dashboard } = this.props;
     const { shareExternally } = this.state;
-    const { trimDefaults } = this.state;
+
+    DashboardInteractions.exportSaveJsonClicked({
+      externally: shareExternally,
+      shareResource: getTrackingSource(this.props.panel),
+    });
 
     if (shareExternally) {
-      this.exporter.makeExportable(dashboard).then((dashboardJson: any) => {
-        if (trimDefaults) {
-          getBackendSrv()
-            .post('/api/dashboards/trim', { dashboard: dashboardJson })
-            .then((resp: any) => {
-              this.openSaveAsDialog(resp.dashboard);
-            });
-        } else {
-          this.openSaveAsDialog(dashboardJson);
-        }
+      this.exporter.makeExportable(dashboard).then((dashboardJson) => {
+        this.openSaveAsDialog(dashboardJson);
       });
     } else {
-      if (trimDefaults) {
-        getBackendSrv()
-          .post('/api/dashboards/trim', { dashboard: dashboard.getSaveModelClone() })
-          .then((resp: any) => {
-            this.openSaveAsDialog(resp.dashboard);
-          });
-      } else {
-        this.openSaveAsDialog(dashboard.getSaveModelClone());
-      }
+      this.openSaveAsDialog(dashboard.getSaveModelClone());
     }
   };
 
   onViewJson = () => {
     const { dashboard } = this.props;
     const { shareExternally } = this.state;
-    const { trimDefaults } = this.state;
+    DashboardInteractions.exportViewJsonClicked({
+      externally: shareExternally,
+      shareResource: getTrackingSource(this.props.panel),
+    });
 
     if (shareExternally) {
-      this.exporter.makeExportable(dashboard).then((dashboardJson: any) => {
-        if (trimDefaults) {
-          getBackendSrv()
-            .post('/api/dashboards/trim', { dashboard: dashboardJson })
-            .then((resp: any) => {
-              this.openJsonModal(resp.dashboard);
-            });
-        } else {
-          this.openJsonModal(dashboardJson);
-        }
+      this.exporter.makeExportable(dashboard).then((dashboardJson) => {
+        this.openJsonModal(dashboardJson);
       });
     } else {
-      if (trimDefaults) {
-        getBackendSrv()
-          .post('/api/dashboards/trim', { dashboard: dashboard.getSaveModelClone() })
-          .then((resp: any) => {
-            this.openJsonModal(resp.dashboard);
-          });
-      } else {
-        this.openJsonModal(dashboard.getSaveModelClone());
-      }
+      this.openJsonModal(dashboard.getSaveModelClone());
     }
   };
 
@@ -124,34 +90,32 @@ export class ShareExport extends PureComponent<Props, State> {
       })
     );
 
-    this.props.onDismiss();
+    this.props.onDismiss?.();
   };
 
   render() {
     const { onDismiss } = this.props;
     const { shareExternally } = this.state;
-    const { trimDefaults } = this.state;
+
+    const exportExternallyTranslation = t('share-modal.export.share-externally-label', `Export for sharing externally`);
 
     return (
       <>
-        <p className="share-modal-info-text">Export this dashboard.</p>
-        <Field label="Export for sharing externally">
-          <Switch value={shareExternally} onChange={this.onShareExternallyChange} />
+        <p>
+          <Trans i18nKey="share-modal.export.info-text">Export this dashboard.</Trans>
+        </p>
+        <Field label={exportExternallyTranslation}>
+          <Switch id="share-externally-toggle" value={shareExternally} onChange={this.onShareExternallyChange} />
         </Field>
-        {config.featureToggles.trimDefaults && (
-          <Field label="Export with default values removed">
-            <Switch value={trimDefaults} onChange={this.onTrimDefaultsChange} />
-          </Field>
-        )}
         <Modal.ButtonRow>
           <Button variant="secondary" onClick={onDismiss} fill="outline">
-            Cancel
+            <Trans i18nKey="share-modal.export.cancel-button">Cancel</Trans>
           </Button>
           <Button variant="secondary" onClick={this.onViewJson}>
-            View JSON
+            <Trans i18nKey="share-modal.export.view-button">View JSON</Trans>
           </Button>
           <Button variant="primary" onClick={this.onSaveAsFile}>
-            Save to file
+            <Trans i18nKey="share-modal.export.save-button">Save to file</Trans>
           </Button>
         </Modal.ButtonRow>
       </>

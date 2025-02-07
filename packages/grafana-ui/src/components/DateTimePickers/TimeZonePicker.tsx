@@ -1,5 +1,6 @@
-import React, { useMemo, useCallback } from 'react';
 import { toLower, isEmpty, isString } from 'lodash';
+import { useMemo, useCallback } from 'react';
+
 import {
   SelectableValue,
   getTimeZoneInfo,
@@ -9,10 +10,13 @@ import {
   TimeZone,
   InternalTimeZones,
 } from '@grafana/data';
+
+import { t } from '../../utils/i18n';
 import { Select } from '../Select/Select';
-import { CompactTimeZoneOption, WideTimeZoneOption, SelectableZone } from './TimeZonePicker/TimeZoneOption';
+
 import { TimeZoneGroup } from './TimeZonePicker/TimeZoneGroup';
 import { formatUtcOffset } from './TimeZonePicker/TimeZoneOffset';
+import { CompactTimeZoneOption, WideTimeZoneOption, SelectableZone } from './TimeZonePicker/TimeZoneOption';
 
 export interface Props {
   onChange: (timeZone?: TimeZone) => void;
@@ -20,12 +24,26 @@ export interface Props {
   width?: number;
   autoFocus?: boolean;
   onBlur?: () => void;
-  includeInternal?: boolean;
+  includeInternal?: boolean | InternalTimeZones[];
   disabled?: boolean;
+  inputId?: string;
+  menuShouldPortal?: boolean;
+  openMenuOnFocus?: boolean;
 }
 
-export const TimeZonePicker: React.FC<Props> = (props) => {
-  const { onChange, width, autoFocus = false, onBlur, value, includeInternal = false, disabled = false } = props;
+export const TimeZonePicker = (props: Props) => {
+  const {
+    onChange,
+    width,
+    autoFocus = false,
+    onBlur,
+    value,
+    includeInternal = false,
+    disabled = false,
+    inputId,
+    menuShouldPortal = true,
+    openMenuOnFocus = true,
+  } = props;
   const groupedTimeZones = useTimeZones(includeInternal);
   const selected = useSelectedTimeZone(groupedTimeZones, value);
   const filterBySearchIndex = useFilterBySearchIndex();
@@ -43,10 +61,12 @@ export const TimeZonePicker: React.FC<Props> = (props) => {
 
   return (
     <Select
+      inputId={inputId}
       value={selected}
-      placeholder="Type to search (country, city, abbreviation)"
+      placeholder={t('time-picker.zone.select-search-input', 'Type to search (country, city, abbreviation)')}
       autoFocus={autoFocus}
-      openMenuOnFocus={true}
+      menuShouldPortal={menuShouldPortal}
+      openMenuOnFocus={openMenuOnFocus}
       width={width}
       filterOption={filterBySearchIndex}
       options={groupedTimeZones}
@@ -54,7 +74,7 @@ export const TimeZonePicker: React.FC<Props> = (props) => {
       onBlur={onBlur}
       components={{ Option: TimeZoneOption, Group: TimeZoneGroup }}
       disabled={disabled}
-      aria-label={'Time zone picker'}
+      aria-label={t('time-picker.zone.select-aria-label', 'Time zone picker')}
     />
   );
 };
@@ -63,7 +83,7 @@ interface SelectableZoneGroup extends SelectableValue<string> {
   options: SelectableZone[];
 }
 
-const useTimeZones = (includeInternal: boolean): SelectableZoneGroup[] => {
+const useTimeZones = (includeInternal: boolean | InternalTimeZones[]): SelectableZoneGroup[] => {
   const now = Date.now();
 
   const timeZoneGroups = getTimeZoneGroups(includeInternal).map((group: GroupedTimeZones) => {

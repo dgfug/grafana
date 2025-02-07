@@ -1,59 +1,180 @@
-import React, { CSSProperties } from 'react';
 import { css } from '@emotion/css';
-import { config } from 'app/core/config';
-import { GrafanaTheme2, PanelData } from '@grafana/data';
-import { stylesFactory } from '@grafana/ui';
-import { CanvasElementOptions, CanvasGroupOptions, DEFAULT_CANVAS_ELEMENT_CONFIG } from 'app/features/canvas';
+import Moveable from 'moveable';
+import { createRef, CSSProperties, RefObject } from 'react';
+import { ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
+import { BehaviorSubject, ReplaySubject, Subject, Subscription } from 'rxjs';
+import Selecto from 'selecto';
+
+import { AppEvents, PanelData } from '@grafana/data';
+import { locationService } from '@grafana/runtime/src';
 import {
   ColorDimensionConfig,
   ResourceDimensionConfig,
+  ScalarDimensionConfig,
   ScaleDimensionConfig,
   TextDimensionConfig,
-  DimensionContext,
-} from 'app/features/dimensions';
+} from '@grafana/schema';
+import { Portal } from '@grafana/ui';
+import { config } from 'app/core/config';
+import { DimensionContext } from 'app/features/dimensions';
 import {
   getColorDimensionFromData,
-  getScaleDimensionFromData,
   getResourceDimensionFromData,
+  getScalarDimensionFromData,
+  getScaleDimensionFromData,
   getTextDimensionFromData,
 } from 'app/features/dimensions/utils';
-import { ReplaySubject } from 'rxjs';
-import { GroupState } from './group';
+import { CanvasContextMenu } from 'app/plugins/panel/canvas/components/CanvasContextMenu';
+import { CanvasTooltip } from 'app/plugins/panel/canvas/components/CanvasTooltip';
+import { Connections } from 'app/plugins/panel/canvas/components/connections/Connections';
+import { AnchorPoint, CanvasTooltipPayload } from 'app/plugins/panel/canvas/types';
+import { getTransformInstance } from 'app/plugins/panel/canvas/utils';
+
+import appEvents from '../../../core/app_events';
+import { CanvasPanel } from '../../../plugins/panel/canvas/CanvasPanel';
+import { CanvasFrameOptions } from '../frame';
+import { DEFAULT_CANVAS_ELEMENT_CONFIG } from '../registry';
+
+import { SceneTransformWrapper } from './SceneTransformWrapper';
 import { ElementState } from './element';
+import { FrameState } from './frame';
+import { RootElement } from './root';
+import { initMoveable } from './sceneAbleManagement';
+import { findElementByTarget } from './sceneElementManagement';
+
+export interface SelectionParams {
+  targets: Array<HTMLElement | SVGElement>;
+  frame?: FrameState;
+}
 
 export class Scene {
-  private root: GroupState;
-  private lookup = new Map<number, ElementState>();
-  styles = getStyles(config.theme2);
-  readonly selected = new ReplaySubject<ElementState | undefined>(undefined);
+  styles = getStyles();
+  readonly selection = new ReplaySubject<ElementState[]>(1);
+  readonly moved = new Subject<number>(); // called after resize/drag for editor updates
+  readonly byName = new Map<string, ElementState>();
+
+  root: RootElement;
+
   revId = 0;
 
   width = 0;
   height = 0;
+  scale = 1;
   style: CSSProperties = {};
   data?: PanelData;
+  selecto?: Selecto;
+  moveable?: Moveable;
+  div?: HTMLDivElement;
+  connections: Connections;
+  currentLayer?: FrameState;
+  isEditingEnabled?: boolean;
+  shouldShowAdvancedTypes?: boolean;
+  shouldPanZoom?: boolean;
+  shouldInfinitePan?: boolean;
+  skipNextSelectionBroadcast = false;
+  ignoreDataUpdate = false;
+  panel: CanvasPanel;
+  contextMenuVisible?: boolean;
+  contextMenuOnVisibilityChange = (visible: boolean) => {
+    this.contextMenuVisible = visible;
+    const transformInstance = getTransformInstance(this);
+    if (transformInstance) {
+      if (visible) {
+        transformInstance.setup.disabled = true;
+      } else {
+        transformInstance.setup.disabled = false;
+      }
+    }
+  };
 
-  constructor(cfg: CanvasGroupOptions, public onSave: (cfg: CanvasGroupOptions) => void) {
-    this.root = this.load(cfg);
+  isPanelEditing = locationService.getSearchObject().editPanel !== undefined;
+
+  inlineEditingCallback?: () => void;
+  setBackgroundCallback?: (anchorPoint: AnchorPoint) => void;
+
+  tooltipCallback?: (tooltip: CanvasTooltipPayload | undefined) => void;
+  tooltip?: CanvasTooltipPayload;
+
+  moveableActionCallback?: (moved: boolean) => void;
+
+  readonly editModeEnabled = new BehaviorSubject<boolean>(false);
+  subscription: Subscription;
+
+  targetsToSelect = new Set<HTMLDivElement>();
+  transformComponentRef: RefObject<ReactZoomPanPinchContentRef> | undefined;
+
+  constructor(
+    cfg: CanvasFrameOptions,
+    enableEditing: boolean,
+    showAdvancedTypes: boolean,
+    panZoom: boolean,
+    infinitePan: boolean,
+    public onSave: (cfg: CanvasFrameOptions) => void,
+    panel: CanvasPanel
+  ) {
+    this.root = this.load(cfg, enableEditing, showAdvancedTypes, panZoom, infinitePan);
+
+    this.subscription = this.editModeEnabled.subscribe((open) => {
+      if (!this.moveable || !this.isEditingEnabled) {
+        return;
+      }
+      this.moveable.draggable = !open;
+    });
+
+    this.panel = panel;
+    this.connections = new Connections(this);
+    this.transformComponentRef = createRef();
   }
 
-  load(cfg: CanvasGroupOptions) {
-    console.log('LOAD', cfg, this);
-    this.root = new GroupState(
-      cfg ?? {
-        type: 'group',
-        elements: [DEFAULT_CANVAS_ELEMENT_CONFIG],
+  getNextElementName = (isFrame = false) => {
+    const label = isFrame ? 'Frame' : 'Element';
+    let idx = this.byName.size + 1;
+
+    const max = idx + 100;
+    while (true && idx < max) {
+      const name = `${label} ${idx++}`;
+      if (!this.byName.has(name)) {
+        return name;
       }
+    }
+
+    return `${label} ${Date.now()}`;
+  };
+
+  canRename = (v: string) => {
+    return !this.byName.has(v);
+  };
+
+  load(
+    cfg: CanvasFrameOptions,
+    enableEditing: boolean,
+    showAdvancedTypes: boolean,
+    panZoom: boolean,
+    infinitePan: boolean
+  ) {
+    this.root = new RootElement(
+      cfg ?? {
+        type: 'frame',
+        elements: [DEFAULT_CANVAS_ELEMENT_CONFIG],
+      },
+      this,
+      this.save // callback when changes are made
     );
 
-    // Build the scene registry
-    this.lookup.clear();
-    this.root.visit((v) => {
-      this.lookup.set(v.UID, v);
+    this.isEditingEnabled = enableEditing;
+    this.shouldShowAdvancedTypes = showAdvancedTypes;
+    this.shouldPanZoom = panZoom;
+    this.shouldInfinitePan = infinitePan;
 
-      // HACK! select the first/only item
-      if (v.item.id !== 'group') {
-        this.selected.next(v);
+    setTimeout(() => {
+      if (this.div) {
+        // If editing is enabled, clear selecto instance
+        const destroySelecto = enableEditing;
+        initMoveable(destroySelecto, enableEditing, this);
+        this.currentLayer = this.root;
+        this.selection.next([]);
+        this.connections.select(undefined);
+        this.connections.updateState();
       }
     });
     return this.root;
@@ -62,8 +183,10 @@ export class Scene {
   context: DimensionContext = {
     getColor: (color: ColorDimensionConfig) => getColorDimensionFromData(this.data, color),
     getScale: (scale: ScaleDimensionConfig) => getScaleDimensionFromData(this.data, scale),
+    getScalar: (scalar: ScalarDimensionConfig) => getScalarDimensionFromData(this.data, scalar),
     getText: (text: TextDimensionConfig) => getTextDimensionFromData(this.data, text),
     getResource: (res: ResourceDimensionConfig) => getResourceDimensionFromData(this.data, res),
+    getPanelData: () => this.data,
   };
 
   updateData(data: PanelData) {
@@ -75,42 +198,127 @@ export class Scene {
     this.width = width;
     this.height = height;
     this.style = { width, height };
-    this.root.updateSize(width, height);
-  }
 
-  onChange(uid: number, cfg: CanvasElementOptions) {
-    const elem = this.lookup.get(uid);
-    if (!elem) {
-      throw new Error('element not found: ' + uid + ' // ' + [...this.lookup.keys()]);
+    if (this.selecto?.getSelectedTargets().length) {
+      this.clearCurrentSelection();
     }
-    this.revId++;
-    elem.onChange(cfg);
-    elem.updateData(this.context); // Refresh any data that may have changed
-    this.save();
   }
 
-  save() {
-    this.onSave(this.root.getSaveModel());
+  clearCurrentSelection(skipNextSelectionBroadcast = false) {
+    this.skipNextSelectionBroadcast = skipNextSelectionBroadcast;
+    let event: MouseEvent = new MouseEvent('click');
+    this.selecto?.clickTarget(event, this.div);
   }
+
+  save = (updateMoveable = false) => {
+    this.onSave(this.root.getSaveModel());
+
+    if (updateMoveable) {
+      setTimeout(() => {
+        if (this.div) {
+          initMoveable(true, this.isEditingEnabled, this);
+        }
+      });
+    }
+  };
+
+  setNonTargetPointerEvents = (target: Element, disablePointerEvents: boolean) => {
+    const stack = [...this.root.elements];
+    while (stack.length > 0) {
+      const currentElement = stack.shift();
+
+      if (currentElement && currentElement.div && currentElement.div !== target) {
+        currentElement.applyLayoutStylesToDiv(disablePointerEvents);
+      }
+
+      const nestedElements = currentElement instanceof FrameState ? currentElement.elements : [];
+      for (const nestedElement of nestedElements) {
+        stack.unshift(nestedElement);
+      }
+    }
+  };
+
+  setRef = (sceneContainer: HTMLDivElement) => {
+    this.div = sceneContainer;
+  };
+
+  select = (selection: SelectionParams) => {
+    if (this.selecto) {
+      this.selecto.setSelectedTargets(selection.targets);
+      this.updateSelection(selection);
+      this.editModeEnabled.next(false);
+
+      // Hide connection anchors on programmatic select
+      if (this.connections.connectionAnchorDiv) {
+        this.connections.connectionAnchorDiv.style.display = 'none';
+      }
+    }
+  };
+
+  updateSelection = (selection: SelectionParams) => {
+    this.moveable!.target = selection.targets;
+    if (this.skipNextSelectionBroadcast) {
+      this.skipNextSelectionBroadcast = false;
+      return;
+    }
+
+    if (selection.frame) {
+      this.selection.next([selection.frame]);
+    } else {
+      const s = selection.targets.map((t) => findElementByTarget(t, this.root.elements)!);
+      this.selection.next(s);
+    }
+  };
+
+  addToSelection = () => {
+    try {
+      let selection: SelectionParams = { targets: [] };
+      selection.targets = [...this.targetsToSelect];
+      this.select(selection);
+    } catch (error) {
+      appEvents.emit(AppEvents.alertError, ['Unable to add to selection']);
+    }
+  };
 
   render() {
-    return (
-      <div key={this.revId} className={this.styles.wrap} style={this.style}>
+    const hasDataLinks = this.tooltip?.element?.getLinks && this.tooltip.element.getLinks({}).length > 0;
+    const hasActions = this.tooltip?.element?.options.actions && this.tooltip.element.options.actions.length > 0;
+
+    const isTooltipValid = hasDataLinks || hasActions || this.tooltip?.element?.data?.field;
+    const canShowElementTooltip = !this.isEditingEnabled && isTooltipValid;
+
+    const sceneDiv = (
+      <div key={this.revId} className={this.styles.wrap} style={this.style} ref={this.setRef}>
+        {this.connections.render()}
         {this.root.render()}
+        {this.isEditingEnabled && (
+          <Portal>
+            <CanvasContextMenu
+              scene={this}
+              panel={this.panel}
+              onVisibilityChange={this.contextMenuOnVisibilityChange}
+            />
+          </Portal>
+        )}
+        {canShowElementTooltip && (
+          <Portal>
+            <CanvasTooltip scene={this} />
+          </Portal>
+        )}
       </div>
+    );
+
+    return config.featureToggles.canvasPanelPanZoom ? (
+      <SceneTransformWrapper scene={this}>{sceneDiv}</SceneTransformWrapper>
+    ) : (
+      sceneDiv
     );
   }
 }
 
-const getStyles = stylesFactory((theme: GrafanaTheme2) => ({
-  wrap: css`
-    overflow: hidden;
-    position: relative;
-  `,
-
-  toolbar: css`
-    position: absolute;
-    bottom: 0;
-    margin: 10px;
-  `,
-}));
+const getStyles = () => ({
+  wrap: css({
+    overflow: 'hidden',
+    position: 'relative',
+  }),
+});

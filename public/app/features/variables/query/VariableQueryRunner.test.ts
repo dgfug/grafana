@@ -1,23 +1,29 @@
 import { of, throwError } from 'rxjs';
-import { getDefaultTimeRange, LoadingState, VariableSupportType } from '@grafana/data';
 import { delay } from 'rxjs/operators';
 
-import { UpdateOptionsResults, VariableQueryRunner } from './VariableQueryRunner';
-import { queryBuilder } from '../shared/testing/builders';
-import { QueryRunner, QueryRunners } from './queryRunners';
-import { toVariableIdentifier, VariableIdentifier } from '../state/types';
-import { QueryVariableModel } from '../types';
-import { updateVariableOptions } from './reducer';
+import {
+  DataSourceApi,
+  getDefaultTimeRange,
+  LoadingState,
+  QueryVariableModel,
+  VariableSupportType,
+} from '@grafana/data';
 
-type DoneCallback = {
-  (...args: any[]): any;
-  fail(error?: string | { message: string }): any;
-};
+import { queryBuilder } from '../shared/testing/builders';
+import { getPreloadedState } from '../state/helpers';
+import { toKeyedAction } from '../state/keyedVariablesReducer';
+import { initialTransactionState } from '../state/transactionReducer';
+import { KeyedVariableIdentifier } from '../state/types';
+import { toKeyedVariableIdentifier } from '../utils';
+
+import { UpdateOptionsResults, VariableQueryRunner } from './VariableQueryRunner';
+import { QueryRunner, QueryRunners } from './queryRunners';
+import { updateVariableOptions } from './reducer';
 
 function expectOnResults(args: {
   runner: VariableQueryRunner;
-  identifier: VariableIdentifier;
-  done: DoneCallback;
+  identifier: KeyedVariableIdentifier;
+  done: jest.DoneCallback;
   expect: (results: UpdateOptionsResults[]) => void;
 }) {
   const { runner, identifier, done, expect: expectCallback } = args;
@@ -32,7 +38,7 @@ function expectOnResults(args: {
           done();
         } catch (err) {
           subscription.unsubscribe();
-          done.fail(err);
+          done(err);
         }
       }
     },
@@ -40,34 +46,33 @@ function expectOnResults(args: {
 }
 
 function getTestContext(variable?: QueryVariableModel) {
-  variable = variable ?? queryBuilder().withId('query').build();
   const getTimeSrv = jest.fn().mockReturnValue({
     timeRange: jest.fn().mockReturnValue(getDefaultTimeRange()),
   });
-  const datasource: any = { metricFindQuery: jest.fn().mockResolvedValue([]) };
-  const identifier = toVariableIdentifier(variable);
+  const key = '0123456789';
+  variable = variable ?? queryBuilder().withId('query').withRootStateKey(key).withName('query').build();
+  const datasource = { metricFindQuery: jest.fn().mockResolvedValue([]) } as unknown as DataSourceApi;
+  const identifier = toKeyedVariableIdentifier(variable);
   const searchFilter = undefined;
   const getTemplatedRegex = jest.fn().mockReturnValue('getTemplatedRegex result');
   const dispatch = jest.fn().mockResolvedValue({});
-  const getState = jest.fn().mockReturnValue({
-    templating: {
-      transaction: {
-        uid: '0123456789',
-      },
-    },
+  const templatingState = {
+    transaction: { ...initialTransactionState, uid: key },
     variables: {
       [variable.id]: variable,
     },
-  });
+  };
+  const getState = jest.fn().mockReturnValue(getPreloadedState(key, templatingState));
   const queryRunner: QueryRunner = {
     type: VariableSupportType.Standard,
     canRun: jest.fn().mockReturnValue(true),
     getTarget: jest.fn().mockReturnValue({ refId: 'A', query: 'A query' }),
     runRequest: jest.fn().mockReturnValue(of({ series: [], state: LoadingState.Done })),
   };
-  const queryRunners = ({
+  const queryRunners = {
+    isQueryRunnerAvailableForDatasource: jest.fn().mockReturnValue(true),
     getRunnerForDatasource: jest.fn().mockReturnValue(queryRunner),
-  } as unknown) as QueryRunners;
+  } as unknown as QueryRunners;
   const getVariable = jest.fn().mockReturnValue(variable);
   const runRequest = jest.fn().mockReturnValue(of({}));
   const runner = new VariableQueryRunner({
@@ -81,6 +86,7 @@ function getTestContext(variable?: QueryVariableModel) {
   });
 
   return {
+    key,
     identifier,
     datasource,
     runner,
@@ -100,16 +106,8 @@ function getTestContext(variable?: QueryVariableModel) {
 describe('VariableQueryRunner', () => {
   describe('happy case', () => {
     it('then it should work as expected', (done) => {
-      const {
-        identifier,
-        runner,
-        datasource,
-        getState,
-        getVariable,
-        queryRunners,
-        queryRunner,
-        dispatch,
-      } = getTestContext();
+      const { key, identifier, runner, datasource, getState, getVariable, queryRunners, queryRunner, dispatch } =
+        getTestContext();
 
       expectOnResults({
         identifier,
@@ -132,11 +130,14 @@ describe('VariableQueryRunner', () => {
           // updateVariableOptions and validateVariableSelectionState
           expect(dispatch).toHaveBeenCalledTimes(2);
           expect(dispatch.mock.calls[0][0]).toEqual(
-            updateVariableOptions({
-              id: 'query',
-              type: 'query',
-              data: { results: [], templatedRegex: 'getTemplatedRegex result' },
-            })
+            toKeyedAction(
+              key,
+              updateVariableOptions({
+                id: 'query',
+                type: 'query',
+                data: { results: [], templatedRegex: 'getTemplatedRegex result' },
+              })
+            )
           );
         },
         done,
@@ -147,23 +148,12 @@ describe('VariableQueryRunner', () => {
   });
 
   describe('error cases', () => {
-    describe('queryRunners.getRunnerForDatasource throws', () => {
+    describe('queryRunners.isQueryRunnerAvailableForDatasource throws', () => {
       it('then it should work as expected', (done) => {
-        const {
-          identifier,
-          runner,
-          datasource,
-          getState,
-          getVariable,
-          queryRunners,
-          queryRunner,
-          dispatch,
-        } = getTestContext();
+        const { identifier, runner, datasource, getState, getVariable, queryRunners, queryRunner, dispatch } =
+          getTestContext();
 
-        queryRunners.getRunnerForDatasource = jest.fn().mockImplementation(() => {
-          throw new Error('getRunnerForDatasource error');
-        });
-
+        queryRunners.isQueryRunnerAvailableForDatasource = jest.fn().mockReturnValue(false);
         expectOnResults({
           identifier,
           runner,
@@ -171,13 +161,17 @@ describe('VariableQueryRunner', () => {
             // verify that the observable works as expected
             expect(results).toEqual([
               { state: LoadingState.Loading, identifier },
-              { state: LoadingState.Error, identifier, error: new Error('getRunnerForDatasource error') },
+              {
+                state: LoadingState.Error,
+                identifier,
+                error: new Error('Query Runner is not available for datasource.'),
+              },
             ]);
 
             // verify that mocks have been called as expected
             expect(getState).toHaveBeenCalledTimes(2);
             expect(getVariable).toHaveBeenCalledTimes(1);
-            expect(queryRunners.getRunnerForDatasource).toHaveBeenCalledTimes(1);
+            expect(queryRunners.isQueryRunnerAvailableForDatasource).toHaveBeenCalledTimes(1);
             expect(queryRunner.getTarget).not.toHaveBeenCalled();
             expect(queryRunner.runRequest).not.toHaveBeenCalled();
             expect(datasource.metricFindQuery).not.toHaveBeenCalled();
@@ -192,16 +186,8 @@ describe('VariableQueryRunner', () => {
 
     describe('runRequest throws', () => {
       it('then it should work as expected', (done) => {
-        const {
-          identifier,
-          runner,
-          datasource,
-          getState,
-          getVariable,
-          queryRunners,
-          queryRunner,
-          dispatch,
-        } = getTestContext();
+        const { identifier, runner, datasource, getState, getVariable, queryRunners, queryRunner, dispatch } =
+          getTestContext();
 
         queryRunner.runRequest = jest.fn().mockReturnValue(throwError(new Error('runRequest error')));
 
