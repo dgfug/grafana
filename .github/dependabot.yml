@@ -5,25 +5,37 @@ updates:
     schedule:
       interval: "daily"
   - package-ecosystem: "gomod"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-  - package-ecosystem: "npm"
-    directory: "/"
+    directories:
+      - "/"
+      - "/apps/playlist"
+      - "/apps/investigation"
+      - "/pkg/aggregator"
+      - "/pkg/apimachinery"
+      - "/pkg/apiserver"
+      - "/pkg/build"
+      - "/pkg/build/wire"
+      - "/pkg/promlib"
+      - "/pkg/semconv"
+      - "/pkg/storage/unified/apistore"
+      - "/pkg/storage/unified/resource"
+      - "/pkg/util/xorm"
     schedule:
       interval: "daily"
-    ignore:
-      # ignore minor/patch updates for now
-      - dependency-name: "*"
-        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
-      # things that will probably need some thinking
-      - dependency-name: "d3"
-      - dependency-name: "husky"
-      - dependency-name: "slate"
-      - dependency-name: "slate-plain-serializer"
-      - dependency-name: "systemjs"
-      - dependency-name: "ts-loader" # we should remove ts-loader and use babel-loader instead
-      - dependency-name: "ora" # we should bump this once we move to esm modules
-    reviewers:
-      - "grafana/frontend-ops"
-    versioning-strategy: "increase-if-necessary"
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/packaging/docker/custom"
+      - "/scripts/verify-repo-update"
+      - "/scripts/build/ci-deploy"
+      - "/scripts/build/ci-windows-test"
+      - "/scripts/build/ci-e2e"
+      - "/scripts/build/ci-wix"
+      - "/scripts/build/ci-msi-build"
+    schedule:
+      interval: "daily"
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10

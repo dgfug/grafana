@@ -1,24 +1,56 @@
-import { dateTime, TimeRange } from '@grafana/data';
-import { initTemplateSrv } from '../../../test/helpers/initTemplateSrv';
+import { dateTime, QueryVariableModel, TimeRange, TypedVariableModel } from '@grafana/data';
+import { setDataSourceSrv, VariableInterpolation } from '@grafana/runtime';
+import {
+  ConstantVariable,
+  CustomVariable,
+  DataSourceVariable,
+  EmbeddedScene,
+  IntervalVariable,
+  QueryVariable,
+  SafeSerializableSceneObject,
+  SceneCanvasText,
+  SceneVariableSet,
+  TestVariable,
+} from '@grafana/scenes';
+import { VariableFormatID } from '@grafana/schema';
+
 import { silenceConsoleOutput } from '../../../test/core/utils/silenceConsoleOutput';
+import { initTemplateSrv } from '../../../test/helpers/initTemplateSrv';
+import { mockDataSource, MockDataSourceSrv } from '../alerting/unified/mocks';
 import { VariableAdapter, variableAdapters } from '../variables/adapters';
-import { createQueryVariableAdapter } from '../variables/query/adapter';
 import { createAdHocVariableAdapter } from '../variables/adhoc/adapter';
-import { VariableModel } from '../variables/types';
-import { FormatRegistryID } from './formatRegistry';
+import { createQueryVariableAdapter } from '../variables/query/adapter';
+
+import { TemplateSrv } from './template_srv';
+
+const key = 'key';
 
 variableAdapters.setInit(() => [
-  (createQueryVariableAdapter() as unknown) as VariableAdapter<VariableModel>,
-  (createAdHocVariableAdapter() as unknown) as VariableAdapter<VariableModel>,
+  createQueryVariableAdapter() as unknown as VariableAdapter<TypedVariableModel>,
+  createAdHocVariableAdapter() as unknown as VariableAdapter<TypedVariableModel>,
 ]);
+
+const interpolateMock = jest.fn();
+const timeRangeMock = jest.fn().mockReturnValue({
+  state: { value: { from: dateTime(1594671549254), to: dateTime(1594671549254), raw: { from: '12', to: '14' } } },
+});
+
+jest.mock('@grafana/scenes', () => ({
+  ...jest.requireActual('@grafana/scenes'),
+  sceneGraph: {
+    ...jest.requireActual('@grafana/scenes').sceneGraph,
+    interpolate: (...args: unknown[]) => interpolateMock(...args),
+    getTimeRange: (...args: unknown[]) => timeRangeMock(...args),
+  },
+}));
 
 describe('templateSrv', () => {
   silenceConsoleOutput();
-  let _templateSrv: any;
+  let _templateSrv: TemplateSrv;
 
   describe('init', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
     });
 
     it('should initialize template data', () => {
@@ -29,12 +61,12 @@ describe('templateSrv', () => {
 
   describe('replace can pass scoped vars', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
     });
 
     it('scoped vars should support objects', () => {
       const target = _templateSrv.replace('${series.name} ${series.nested.field}', {
-        series: { value: { name: 'Server1', nested: { field: 'nested' } } },
+        series: { value: { name: 'Server1', nested: { field: 'nested' } }, text: 'foo' },
       });
       expect(target).toBe('Server1 nested');
     });
@@ -49,14 +81,14 @@ describe('templateSrv', () => {
 
     it('scoped vars should support objects with propert names with dot', () => {
       const target = _templateSrv.replace('${series.name} ${series.nested["field.with.dot"]}', {
-        series: { value: { name: 'Server1', nested: { 'field.with.dot': 'nested' } } },
+        series: { value: { name: 'Server1', nested: { 'field.with.dot': 'nested' } }, text: 'foo' },
       });
       expect(target).toBe('Server1 nested');
     });
 
     it('scoped vars should support arrays of objects', () => {
       const target = _templateSrv.replace('${series.rows[0].name} ${series.rows[1].name}', {
-        series: { value: { rows: [{ name: 'first' }, { name: 'second' }] } },
+        series: { value: { rows: [{ name: 'first' }, { name: 'second' }] }, text: 'foo' },
       });
       expect(target).toBe('first second');
     });
@@ -111,17 +143,93 @@ describe('templateSrv', () => {
     });
   });
 
+  describe('replace with interpolations map', function () {
+    beforeEach(() => {
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'testValue' } }]);
+    });
+
+    it('replace can save interpolation result', () => {
+      let interpolations: VariableInterpolation[] = [];
+
+      const target = _templateSrv.replace(
+        'test.${test}.${scoped}.${nested.name}.${test}.${optionTest:raw}.$notfound',
+        {
+          scoped: { value: 'scopedValue', text: 'scopedText' },
+          optionTest: { value: 'optionTestValue', text: 'optionTestText' },
+          nested: { value: { name: 'nestedValue' } },
+        },
+        undefined,
+        interpolations
+      );
+
+      expect(target).toBe('test.testValue.scopedValue.nestedValue.testValue.optionTestValue.$notfound');
+      expect(interpolations.length).toBe(6);
+      expect(interpolations).toEqual([
+        {
+          match: '${test}',
+          found: true,
+          value: 'testValue',
+          variableName: 'test',
+        },
+        {
+          match: '${scoped}',
+          found: true,
+          value: 'scopedValue',
+          variableName: 'scoped',
+        },
+        {
+          fieldPath: 'name',
+          match: '${nested.name}',
+          found: true,
+          value: 'nestedValue',
+          variableName: 'nested',
+        },
+        {
+          match: '${test}',
+          found: true,
+          value: 'testValue',
+          variableName: 'test',
+        },
+        {
+          format: 'raw',
+          match: '${optionTest:raw}',
+          found: true,
+          value: 'optionTestValue',
+          variableName: 'optionTest',
+        },
+        {
+          match: '$notfound',
+          found: false,
+          value: '$notfound',
+          variableName: 'notfound',
+        },
+      ]);
+    });
+  });
+
   describe('getAdhocFilters', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'datasource',
           name: 'ds',
-          current: { value: 'logstash', text: 'logstash' },
+          current: { value: 'logstash-id', text: 'logstash' },
         },
-        { type: 'adhoc', name: 'test', datasource: 'oogle', filters: [1] },
-        { type: 'adhoc', name: 'test2', datasource: '$ds', filters: [2] },
+        { type: 'adhoc', name: 'test', datasource: { uid: 'oogle' }, filters: [1] },
+        { type: 'adhoc', name: 'test2', datasource: { uid: '$ds' }, filters: [2] },
       ]);
+      setDataSourceSrv(
+        new MockDataSourceSrv({
+          oogle: mockDataSource({
+            name: 'oogle',
+            uid: 'oogle',
+          }),
+          logstash: mockDataSource({
+            name: 'logstash',
+            uid: 'logstash-id',
+          }),
+        })
+      );
     });
 
     it('should return filters if datasourceName match', () => {
@@ -142,7 +250,7 @@ describe('templateSrv', () => {
 
   describe('replace can pass multi / all format', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'query',
           name: 'test',
@@ -158,7 +266,7 @@ describe('templateSrv', () => {
 
     describe('when the globbed variable only has one value', () => {
       beforeEach(() => {
-        _templateSrv = initTemplateSrv([
+        _templateSrv = initTemplateSrv(key, [
           {
             type: 'query',
             name: 'test',
@@ -206,7 +314,7 @@ describe('templateSrv', () => {
 
   describe('variable with all option', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'query',
           name: 'test',
@@ -244,7 +352,7 @@ describe('templateSrv', () => {
 
   describe('variable with all option and custom value', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'query',
           name: 'test',
@@ -284,23 +392,42 @@ describe('templateSrv', () => {
       const target = _templateSrv.replace('${test:queryparam}', {});
       expect(target).toBe('var-test=All');
     });
+
+    describe('percentencode option', () => {
+      beforeEach(() => {
+        _templateSrv = initTemplateSrv(key, [
+          {
+            type: 'query',
+            name: 'test',
+            current: { value: '$__all' },
+            allValue: '.+',
+            options: [{ value: 'value1' }, { value: 'value2' }],
+          },
+        ]);
+      });
+
+      it('should respect percentencode format', () => {
+        const target = _templateSrv.replace('this.${test:percentencode}', {}, 'regex');
+        expect(target).toBe('this..%2B');
+      });
+    });
   });
 
   describe('lucene format', () => {
     it('should properly escape $test with lucene escape sequences', () => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'value/4' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'value/4' } }]);
       const target = _templateSrv.replace('this:$test', {}, 'lucene');
       expect(target).toBe('this:value\\/4');
     });
 
     it('should properly escape ${test} with lucene escape sequences', () => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'value/4' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'value/4' } }]);
       const target = _templateSrv.replace('this:${test}', {}, 'lucene');
       expect(target).toBe('this:value\\/4');
     });
 
     it('should properly escape ${test:lucene} with lucene escape sequences', () => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'value/4' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'value/4' } }]);
       const target = _templateSrv.replace('this:${test:lucene}', {});
       expect(target).toBe('this:value\\/4');
     });
@@ -308,7 +435,7 @@ describe('templateSrv', () => {
 
   describe('html format', () => {
     it('should encode values html escape sequences', () => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         { type: 'query', name: 'test', current: { value: '<script>alert(asd)</script>' } },
       ]);
       const target = _templateSrv.replace('$test', {}, 'html');
@@ -316,148 +443,50 @@ describe('templateSrv', () => {
     });
   });
 
-  describe('format variable to string values', () => {
-    it('single value should return value', () => {
-      const result = _templateSrv.formatValue('test');
-      expect(result).toBe('test');
-    });
-
-    it('should use glob format when unknown format provided', () => {
-      let result = _templateSrv.formatValue('test', 'nonexistentformat');
-      expect(result).toBe('test');
-      result = _templateSrv.formatValue(['test', 'test1'], 'nonexistentformat');
-      expect(result).toBe('{test,test1}');
-    });
-
-    it('multi value and glob format should render glob string', () => {
-      const result = _templateSrv.formatValue(['test', 'test2'], 'glob');
-      expect(result).toBe('{test,test2}');
-    });
-
-    it('multi value and lucene should render as lucene expr', () => {
-      const result = _templateSrv.formatValue(['test', 'test2'], 'lucene');
-      expect(result).toBe('("test" OR "test2")');
-    });
-
-    it('multi value and regex format should render regex string', () => {
-      const result = _templateSrv.formatValue(['test.', 'test2'], 'regex');
-      expect(result).toBe('(test\\.|test2)');
-    });
-
-    it('multi value and pipe should render pipe string', () => {
-      const result = _templateSrv.formatValue(['test', 'test2'], 'pipe');
-      expect(result).toBe('test|test2');
-    });
-
-    it('multi value and distributed should render distributed string', () => {
-      const result = _templateSrv.formatValue(['test', 'test2'], 'distributed', {
-        name: 'build',
-      });
-      expect(result).toBe('test,build=test2');
-    });
-
-    it('multi value and distributed should render when not string', () => {
-      const result = _templateSrv.formatValue(['test'], 'distributed', {
-        name: 'build',
-      });
-      expect(result).toBe('test');
-    });
-
-    it('multi value and csv format should render csv string', () => {
-      const result = _templateSrv.formatValue(['test', 'test2'], 'csv');
-      expect(result).toBe('test,test2');
-    });
-
-    it('multi value and percentencode format should render percent-encoded string', () => {
-      const result = _templateSrv.formatValue(['foo()bar BAZ', 'test2'], 'percentencode');
-      expect(result).toBe('%7Bfoo%28%29bar%20BAZ%2Ctest2%7D');
-    });
-
-    it('slash should be properly escaped in regex format', () => {
-      const result = _templateSrv.formatValue('Gi3/14', 'regex');
-      expect(result).toBe('Gi3\\/14');
-    });
-
-    it('single value and singlequote format should render string with value enclosed in single quotes', () => {
-      const result = _templateSrv.formatValue('test', 'singlequote');
-      expect(result).toBe("'test'");
-    });
-
-    it('multi value and singlequote format should render string with values enclosed in single quotes', () => {
-      const result = _templateSrv.formatValue(['test', "test'2"], 'singlequote');
-      expect(result).toBe("'test','test\\'2'");
-    });
-
-    it('single value and doublequote format should render string with value enclosed in double quotes', () => {
-      const result = _templateSrv.formatValue('test', 'doublequote');
-      expect(result).toBe('"test"');
-    });
-
-    it('multi value and doublequote format should render string with values enclosed in double quotes', () => {
-      const result = _templateSrv.formatValue(['test', 'test"2'], 'doublequote');
-      expect(result).toBe('"test","test\\"2"');
-    });
-
-    it('single value and sqlstring format should render string with value enclosed in single quotes', () => {
-      const result = _templateSrv.formatValue("test'value", 'sqlstring');
-      expect(result).toBe(`'test''value'`);
-    });
-
-    it('multi value and sqlstring format should render string with values enclosed in single quotes', () => {
-      const result = _templateSrv.formatValue(['test', "test'value2"], 'sqlstring');
-      expect(result).toBe(`'test','test''value2'`);
-    });
-
-    it('raw format should leave value intact and do no escaping', () => {
-      const result = _templateSrv.formatValue("'test\n", 'raw');
-      expect(result).toBe("'test\n");
-    });
-  });
-
   describe('can check if variable exists', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
     });
 
     it('should return true if $test exists', () => {
-      const result = _templateSrv.variableExists('$test');
+      const result = _templateSrv.containsTemplate('$test');
       expect(result).toBe(true);
     });
 
     it('should return true if $test exists in string', () => {
-      const result = _templateSrv.variableExists('something $test something');
+      const result = _templateSrv.containsTemplate('something $test something');
       expect(result).toBe(true);
     });
 
     it('should return true if [[test]] exists in string', () => {
-      const result = _templateSrv.variableExists('something [[test]] something');
+      const result = _templateSrv.containsTemplate('something [[test]] something');
       expect(result).toBe(true);
     });
 
     it('should return true if [[test:csv]] exists in string', () => {
-      const result = _templateSrv.variableExists('something [[test:csv]] something');
+      const result = _templateSrv.containsTemplate('something [[test:csv]] something');
       expect(result).toBe(true);
     });
 
     it('should return true if ${test} exists in string', () => {
-      const result = _templateSrv.variableExists('something ${test} something');
+      const result = _templateSrv.containsTemplate('something ${test} something');
       expect(result).toBe(true);
     });
 
     it('should return true if ${test:raw} exists in string', () => {
-      const result = _templateSrv.variableExists('something ${test:raw} something');
+      const result = _templateSrv.containsTemplate('something ${test:raw} something');
       expect(result).toBe(true);
     });
 
     it('should return null if there are no variables in string', () => {
-      const result = _templateSrv.variableExists('string without variables');
+      const result = _templateSrv.containsTemplate('string without variables');
       expect(result).toBe(false);
     });
   });
 
   describe('can highlight variables in string', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'oogle' } }]);
     });
 
     it('should insert html', () => {
@@ -478,7 +507,7 @@ describe('templateSrv', () => {
 
   describe('updateIndex with simple value', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: 'muuuu' } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: 'muuuu' } }]);
     });
 
     it('should set current value and update template data', () => {
@@ -489,7 +518,7 @@ describe('templateSrv', () => {
 
   describe('replaceWithText', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'query',
           name: 'server',
@@ -534,7 +563,7 @@ describe('templateSrv', () => {
 
   describe('replaceWithText can pass all / multi value', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'query',
           name: 'server',
@@ -585,7 +614,7 @@ describe('templateSrv', () => {
 
   describe('built in interval variables', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([]);
+      _templateSrv = initTemplateSrv(key, []);
     });
 
     it('should replace $__interval_ms with interval milliseconds', () => {
@@ -598,7 +627,7 @@ describe('templateSrv', () => {
 
   describe('date formating', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([], {
+      _templateSrv = initTemplateSrv(key, [], {
         from: dateTime(1594671549254),
         to: dateTime(1595237229747),
       } as TimeRange);
@@ -632,13 +661,14 @@ describe('templateSrv', () => {
 
   describe('handle objects gracefully', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value: { test: 'A' } } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value: { test: 'A' } } }]);
     });
 
     it('should not pass object to custom function', () => {
-      let passedValue: any = null;
-      _templateSrv.replace('this.${test}.filters', {}, (value: any) => {
+      let passedValue: string | null = null;
+      _templateSrv.replace('this.${test}.filters', {}, (value: string) => {
         passedValue = value;
+        return '';
       });
 
       expect(passedValue).toBe('[object Object]');
@@ -648,13 +678,14 @@ describe('templateSrv', () => {
   describe('handle objects gracefully and call toString if defined', () => {
     beforeEach(() => {
       const value = { test: 'A', toString: () => 'hello' };
-      _templateSrv = initTemplateSrv([{ type: 'query', name: 'test', current: { value } }]);
+      _templateSrv = initTemplateSrv(key, [{ type: 'query', name: 'test', current: { value } }]);
     });
 
     it('should not pass object to custom function', () => {
-      let passedValue: any = null;
-      _templateSrv.replace('this.${test}.filters', {}, (value: any) => {
+      let passedValue: string | null = null;
+      _templateSrv.replace('this.${test}.filters', {}, (value: string) => {
         passedValue = value;
+        return '';
       });
 
       expect(passedValue).toBe('hello');
@@ -663,7 +694,7 @@ describe('templateSrv', () => {
 
   describe('adhoc variables', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'adhoc',
           name: 'adhoc',
@@ -686,9 +717,9 @@ describe('templateSrv', () => {
     });
 
     it(`should not be handled by any registry items except for queryparam`, () => {
-      const registryItems = Object.values(FormatRegistryID);
+      const registryItems = Object.values(VariableFormatID);
       for (const registryItem of registryItems) {
-        if (registryItem === FormatRegistryID.queryParam) {
+        if (registryItem === VariableFormatID.QueryParam) {
           continue;
         }
 
@@ -703,7 +734,7 @@ describe('templateSrv', () => {
 
   describe('queryparam', () => {
     beforeEach(() => {
-      _templateSrv = initTemplateSrv([
+      _templateSrv = initTemplateSrv(key, [
         {
           type: 'query',
           name: 'single',
@@ -742,8 +773,18 @@ describe('templateSrv', () => {
       expect(target).toBe('var-single=value1');
     });
 
+    it('query variable with single value with queryparam format and scoped vars should return correct queryparam', () => {
+      const target = _templateSrv.replace(`\${single:queryparam}`, { single: { value: 'value1', text: 'value1' } });
+      expect(target).toBe('var-single=value1');
+    });
+
     it('query variable with single value and queryparam format should return correct queryparam', () => {
       const target = _templateSrv.replace('${single}', {}, 'queryparam');
+      expect(target).toBe('var-single=value1');
+    });
+
+    it('query variable with single value and queryparam format and scoped vars should return correct queryparam', () => {
+      const target = _templateSrv.replace('${single}', { single: { value: 'value1', text: 'value1' } }, 'queryparam');
       expect(target).toBe('var-single=value1');
     });
 
@@ -752,9 +793,19 @@ describe('templateSrv', () => {
       expect(target).toBe('var-multi=value1&var-multi=value2');
     });
 
+    it('query variable with multi value with queryparam format and scoped vars should return correct queryparam', () => {
+      const target = _templateSrv.replace(`\${multi:queryparam}`, { multi: { value: 'value2', text: 'value2' } });
+      expect(target).toBe('var-multi=value2');
+    });
+
     it('query variable with multi value and queryparam format should return correct queryparam', () => {
       const target = _templateSrv.replace('${multi}', {}, 'queryparam');
       expect(target).toBe('var-multi=value1&var-multi=value2');
+    });
+
+    it('query variable with multi value and queryparam format and scoped vars should return correct queryparam', () => {
+      const target = _templateSrv.replace('${multi}', { multi: { value: 'value2', text: 'value2' } }, 'queryparam');
+      expect(target).toBe('var-multi=value2');
     });
 
     it('query variable with adhoc value with queryparam format should return correct queryparam', () => {
@@ -762,9 +813,118 @@ describe('templateSrv', () => {
       expect(target).toBe('var-adhoc=alertstate%7C%3D%7Cfiring&var-adhoc=alertname%7C%3D%7CExampleAlertAlwaysFiring');
     });
 
-    it('query variable with multi value and queryparam format should return correct queryparam', () => {
+    it('query variable with adhoc value with queryparam format should return correct queryparam', () => {
+      const target = _templateSrv.replace(`\${adhoc:queryparam}`, { adhoc: { value: 'value2', text: 'value2' } });
+      expect(target).toBe('var-adhoc=value2');
+    });
+
+    it('query variable with adhoc value and queryparam format should return correct queryparam', () => {
       const target = _templateSrv.replace('${adhoc}', {}, 'queryparam');
       expect(target).toBe('var-adhoc=alertstate%7C%3D%7Cfiring&var-adhoc=alertname%7C%3D%7CExampleAlertAlwaysFiring');
+    });
+
+    it('query variable with adhoc value and queryparam format should return correct queryparam', () => {
+      const target = _templateSrv.replace('${adhoc}', { adhoc: { value: 'value2', text: 'value2' } }, 'queryparam');
+      expect(target).toBe('var-adhoc=value2');
+    });
+  });
+
+  describe('scenes compatibility', () => {
+    beforeEach(() => {
+      _templateSrv = initTemplateSrv(key, []);
+      interpolateMock.mockClear();
+    });
+
+    it('should use scene interpolator when scoped var provided', () => {
+      const variable = new TestVariable({});
+
+      _templateSrv.replace('test ${test}', { __sceneObject: { value: variable, text: 'foo' } });
+
+      expect(interpolateMock).toHaveBeenCalledTimes(1);
+      expect(interpolateMock.mock.calls[0][0]).toEqual(variable);
+      expect(interpolateMock.mock.calls[0][1]).toEqual('test ${test}');
+    });
+
+    it('should use scene interpolator when scoped var provided via SafeSerializableSceneObject', () => {
+      const variable = new TestVariable({});
+      const serializable = new SafeSerializableSceneObject(variable);
+      _templateSrv.replace('test ${test}', { __sceneObject: serializable });
+
+      expect(interpolateMock).toHaveBeenCalledTimes(1);
+      expect(interpolateMock.mock.calls[0][0]).toEqual(variable);
+      expect(interpolateMock.mock.calls[0][1]).toEqual('test ${test}');
+    });
+
+    it('should use scene interpolator global __grafanaSceneContext is active', () => {
+      window.__grafanaSceneContext = new EmbeddedScene({
+        $variables: new SceneVariableSet({
+          variables: [new ConstantVariable({ name: 'sceneVar', value: 'hello' })],
+        }),
+        body: new SceneCanvasText({ text: 'hello' }),
+      });
+
+      window.__grafanaSceneContext.activate();
+
+      _templateSrv.replace('test ${sceneVar}');
+      expect(interpolateMock).toHaveBeenCalledTimes(1);
+      expect(interpolateMock.mock.calls[0][0]).toEqual(window.__grafanaSceneContext);
+      expect(interpolateMock.mock.calls[0][1]).toEqual('test ${sceneVar}');
+    });
+
+    it('Can use getVariables to access scene variables', () => {
+      window.__grafanaSceneContext = new EmbeddedScene({
+        $variables: new SceneVariableSet({
+          variables: [
+            new QueryVariable({ name: 'server', value: 'serverA', text: 'Server A', query: { refId: 'A' } }),
+            new QueryVariable({ name: 'pods', value: ['pA', 'pB'], text: ['podA', 'podB'], query: { refId: 'A' } }),
+            new DataSourceVariable({ name: 'ds', value: 'dsA', text: 'dsA', pluginId: 'prometheus' }),
+            new CustomVariable({ name: 'custom', value: 'A', text: 'A', query: 'A, B, C' }),
+            new IntervalVariable({ name: 'interval', value: '1m', intervals: ['1m', '2m'] }),
+          ],
+        }),
+        body: new SceneCanvasText({ text: 'hello' }),
+      });
+
+      window.__grafanaSceneContext.activate();
+
+      const vars = _templateSrv.getVariables();
+      expect(vars.length).toBe(5);
+
+      const serverVar = vars[0] as QueryVariableModel;
+
+      expect(serverVar.name).toBe('server');
+      expect(serverVar.type).toBe('query');
+      expect(serverVar.current.value).toBe('serverA');
+      expect(serverVar.current.text).toBe('Server A');
+
+      const podVar = vars[1] as QueryVariableModel;
+
+      expect(podVar.name).toBe('pods');
+      expect(podVar.type).toBe('query');
+      expect(podVar.current.value).toEqual(['pA', 'pB']);
+      expect(podVar.current.text).toEqual(['podA', 'podB']);
+    });
+
+    it('Should return timeRange from scenes context', () => {
+      window.__grafanaSceneContext = new EmbeddedScene({
+        body: new SceneCanvasText({ text: 'hello' }),
+      });
+      _templateSrv.updateTimeRange({
+        from: dateTime(1594671549254),
+        to: dateTime(1594671549254),
+        raw: { from: '10', to: '10' },
+      });
+
+      const deactivate = window.__grafanaSceneContext.activate();
+
+      expect(_templateSrv.timeRange).not.toBeNull();
+      expect(_templateSrv.timeRange).not.toBeUndefined();
+      expect(_templateSrv.timeRange!.raw).toEqual({ from: '12', to: '14' });
+      expect(timeRangeMock).toHaveBeenCalled();
+
+      deactivate();
+
+      expect(_templateSrv.timeRange!.raw).toEqual({ from: '10', to: '10' });
     });
   });
 });

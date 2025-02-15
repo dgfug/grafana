@@ -4,6 +4,7 @@
 export type TraceKeyValuePair<T = any> = {
   key: string;
   value: T;
+  type?: string;
 };
 
 /**
@@ -13,6 +14,13 @@ export type TraceLog = {
   // Millisecond epoch time
   timestamp: number;
   fields: TraceKeyValuePair[];
+  name?: string;
+};
+
+export type TraceSpanReference = {
+  traceID: string;
+  spanID: string;
+  tags?: TraceKeyValuePair[];
 };
 
 /**
@@ -31,9 +39,15 @@ export interface TraceSpanRow {
   // Milliseconds
   duration: number;
   logs?: TraceLog[];
-
+  references?: TraceSpanReference[];
   // Note: To mark spen as having error add tag error: true
   tags?: TraceKeyValuePair[];
+  kind?: string;
+  statusCode?: number;
+  statusMessage?: string;
+  instrumentationLibraryName?: string;
+  instrumentationLibraryVersion?: string;
+  traceState?: string;
   warnings?: string[];
   stackTraces?: string[];
 
