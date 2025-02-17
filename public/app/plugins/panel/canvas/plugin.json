@@ -2,10 +2,9 @@
   "type": "panel",
   "name": "Canvas",
   "id": "canvas",
-  "state": "alpha",
 
   "info": {
-    "description": "Explict element placement",
+    "description": "Explicit element placement",
     "author": {
       "name": "Grafana Labs",
       "url": "https://grafana.com"

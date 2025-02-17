@@ -1,20 +1,42 @@
-import React from 'react';
-import { Collapse } from '@grafana/ui';
+import { useMemo } from 'react';
+
 import { DataFrame, SplitOpen } from '@grafana/data';
+import { PanelChrome } from '@grafana/ui';
+import { StoreState, useSelector } from 'app/types';
+
 import { TraceView } from './TraceView';
-import { ExploreId } from 'app/types/explore';
+import { transformDataFrames } from './utils/transform';
 
 interface Props {
   dataFrames: DataFrame[];
   splitOpenFn: SplitOpen;
-  exploreId: ExploreId;
+  exploreId: string;
+  scrollElement?: Element;
 }
+
 export function TraceViewContainer(props: Props) {
-  const { dataFrames, splitOpenFn, exploreId } = props;
+  // At this point we only show single trace
+  const frame = props.dataFrames[0];
+  const { dataFrames, splitOpenFn, exploreId, scrollElement } = props;
+  const traceProp = useMemo(() => transformDataFrames(frame), [frame]);
+  const datasource = useSelector(
+    (state: StoreState) => state.explore.panes[props.exploreId]?.datasourceInstance ?? undefined
+  );
+
+  if (!traceProp) {
+    return null;
+  }
 
   return (
-    <Collapse label="Trace View" isOpen>
-      <TraceView exploreId={exploreId} dataFrames={dataFrames} splitOpenFn={splitOpenFn} />
-    </Collapse>
+    <PanelChrome padding="none" title="Trace">
+      <TraceView
+        exploreId={exploreId}
+        dataFrames={dataFrames}
+        splitOpenFn={splitOpenFn}
+        scrollElement={scrollElement}
+        traceProp={traceProp}
+        datasource={datasource}
+      />
+    </PanelChrome>
   );
 }

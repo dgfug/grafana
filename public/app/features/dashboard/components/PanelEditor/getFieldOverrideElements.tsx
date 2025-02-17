@@ -1,5 +1,7 @@
-import React from 'react';
+import { css } from '@emotion/css';
 import { cloneDeep } from 'lodash';
+import * as React from 'react';
+
 import {
   FieldConfigOptionsRegistry,
   SelectableValue,
@@ -8,46 +10,58 @@ import {
   DynamicConfigValue,
   ConfigOverrideRule,
   GrafanaTheme2,
+  fieldMatchers,
+  FieldConfigSource,
+  DataFrame,
 } from '@grafana/data';
 import { fieldMatchersUI, useStyles2, ValuePicker } from '@grafana/ui';
-import { OptionPaneRenderProps } from './types';
-import { OptionsPaneItemDescriptor } from './OptionsPaneItemDescriptor';
-import { OptionsPaneCategoryDescriptor } from './OptionsPaneCategoryDescriptor';
-import { DynamicConfigValueEditor } from './DynamicConfigValueEditor';
 import { getDataLinksVariableSuggestions } from 'app/features/panel/panellinks/link_srv';
+
+import { DynamicConfigValueEditor } from './DynamicConfigValueEditor';
+import { OptionsPaneCategoryDescriptor } from './OptionsPaneCategoryDescriptor';
+import { OptionsPaneItemDescriptor } from './OptionsPaneItemDescriptor';
 import { OverrideCategoryTitle } from './OverrideCategoryTitle';
-import { css } from '@emotion/css';
 
-export function getFieldOverrideCategories(props: OptionPaneRenderProps): OptionsPaneCategoryDescriptor[] {
+export function getFieldOverrideCategories(
+  fieldConfig: FieldConfigSource,
+  registry: FieldConfigOptionsRegistry,
+  data: DataFrame[],
+  searchQuery: string,
+  onFieldConfigsChange: (config: FieldConfigSource) => void
+): OptionsPaneCategoryDescriptor[] {
   const categories: OptionsPaneCategoryDescriptor[] = [];
-  const currentFieldConfig = props.panel.fieldConfig;
-  const registry = props.plugin.fieldConfigRegistry;
-  const data = props.data?.series ?? [];
+  const currentFieldConfig = fieldConfig;
 
-  if (registry.isEmpty()) {
+  if (!registry || registry.isEmpty()) {
     return [];
   }
 
-  const onOverrideChange = (index: number, override: any) => {
+  const onOverrideChange = (index: number, override: ConfigOverrideRule) => {
     let overrides = cloneDeep(currentFieldConfig.overrides);
     overrides[index] = override;
-    props.onFieldConfigsChange({ ...currentFieldConfig, overrides });
+    onFieldConfigsChange({ ...currentFieldConfig, overrides });
   };
 
   const onOverrideRemove = (overrideIndex: number) => {
     let overrides = cloneDeep(currentFieldConfig.overrides);
     overrides.splice(overrideIndex, 1);
-    props.onFieldConfigsChange({ ...currentFieldConfig, overrides });
+    onFieldConfigsChange({ ...currentFieldConfig, overrides });
   };
 
   const onOverrideAdd = (value: SelectableValue<string>) => {
-    props.onFieldConfigsChange({
+    const info = fieldMatchers.get(value.value!);
+    if (!info) {
+      return;
+    }
+
+    onFieldConfigsChange({
       ...currentFieldConfig,
       overrides: [
         ...currentFieldConfig.overrides,
         {
           matcher: {
-            id: value.value!,
+            id: info.id,
+            options: info.defaultOptions,
           },
           properties: [],
         },
@@ -91,25 +105,24 @@ export function getFieldOverrideCategories(props: OptionPaneRenderProps): Option
       },
     });
 
-    const onMatcherConfigChange = (options: any) => {
-      override.matcher.options = options;
-      onOverrideChange(idx, override);
+    const onMatcherConfigChange = (options: unknown) => {
+      onOverrideChange(idx, {
+        ...override,
+        matcher: { ...override.matcher, options },
+      });
     };
 
-    const onDynamicConfigValueAdd = (o: ConfigOverrideRule, value: SelectableValue<string>) => {
+    const onDynamicConfigValueAdd = (override: ConfigOverrideRule, value: SelectableValue<string>) => {
       const registryItem = registry.get(value.value!);
       const propertyConfig: DynamicConfigValue = {
         id: registryItem.id,
         value: registryItem.defaultValue,
       };
 
-      if (override.properties) {
-        o.properties.push(propertyConfig);
-      } else {
-        o.properties = [propertyConfig];
-      }
+      const properties = override.properties ?? [];
+      properties.push(propertyConfig);
 
-      onOverrideChange(idx, o);
+      onOverrideChange(idx, { ...override, properties });
     };
 
     /**
@@ -121,8 +134,9 @@ export function getFieldOverrideCategories(props: OptionPaneRenderProps): Option
         render: function renderMatcherUI() {
           return (
             <matcherUi.component
+              id={`${matcherUi.matcher.id}-${idx}`}
               matcher={matcherUi.matcher}
-              data={props.data?.series ?? []}
+              data={data ?? []}
               options={override.matcher.options}
               onChange={onMatcherConfigChange}
             />
@@ -142,14 +156,24 @@ export function getFieldOverrideCategories(props: OptionPaneRenderProps): Option
         continue;
       }
 
-      const onPropertyChange = (value: any) => {
-        override.properties[propIdx].value = value;
-        onOverrideChange(idx, override);
+      const onPropertyChange = (value: DynamicConfigValue) => {
+        onOverrideChange(idx, {
+          ...override,
+          properties: override.properties.map((prop, i) => {
+            if (i === propIdx) {
+              return { ...prop, value: value };
+            }
+
+            return prop;
+          }),
+        });
       };
 
       const onPropertyRemove = () => {
-        override.properties.splice(propIdx, 1);
-        onOverrideChange(idx, override);
+        onOverrideChange(idx, {
+          ...override,
+          properties: override.properties.filter((_, i) => i !== propIdx),
+        });
       };
 
       /**
@@ -169,6 +193,7 @@ export function getFieldOverrideCategories(props: OptionPaneRenderProps): Option
                 property={property}
                 registry={registry}
                 context={context}
+                searchQuery={searchQuery}
               />
             );
           },
@@ -260,5 +285,6 @@ function getBorderTopStyles(theme: GrafanaTheme2) {
   return css({
     borderTop: `1px solid ${theme.colors.border.weak}`,
     padding: `${theme.spacing(2)}`,
+    display: 'flex',
   });
 }
