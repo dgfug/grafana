@@ -1,15 +1,17 @@
-import React from 'react';
+import { ReactElement } from 'react';
+
 import { PluginErrorCode } from '@grafana/data';
-import { Alert } from '@grafana/ui';
-import { CatalogPlugin } from '../types';
 import { selectors } from '@grafana/e2e-selectors';
+import { Alert } from '@grafana/ui';
+
+import { CatalogPlugin } from '../types';
 
 type Props = {
   className?: string;
   plugin: CatalogPlugin;
 };
 
-export function PluginDetailsDisabledError({ className, plugin }: Props): React.ReactElement | null {
+export function PluginDetailsDisabledError({ className, plugin }: Props): ReactElement | null {
   if (!plugin.isDisabled) {
     return null;
   }
@@ -19,7 +21,7 @@ export function PluginDetailsDisabledError({ className, plugin }: Props): React.
       severity="error"
       title="Plugin disabled"
       className={className}
-      aria-label={selectors.pages.PluginPage.disabledInfo}
+      data-testid={selectors.pages.PluginPage.disabledInfo}
     >
       {renderDescriptionFromError(plugin.error)}
       <p>Please contact your server administrator to get this resolved.</p>
@@ -35,7 +37,7 @@ export function PluginDetailsDisabledError({ className, plugin }: Props): React.
   );
 }
 
-function renderDescriptionFromError(error?: PluginErrorCode): React.ReactElement {
+function renderDescriptionFromError(error?: PluginErrorCode): ReactElement {
   switch (error) {
     case PluginErrorCode.modifiedSignature:
       return (
@@ -64,10 +66,15 @@ function renderDescriptionFromError(error?: PluginErrorCode): React.ReactElement
           version of this plugin.
         </p>
       );
+    case PluginErrorCode.failedBackendStart:
+      return <p>This plugin failed to start. Server logs can provide more information.</p>;
+    case PluginErrorCode.angular:
+      // Error message already rendered by AngularDeprecationPluginNotice
+      return <></>;
     default:
       return (
         <p>
-          We failed to run this plugin due to an unkown reason and have therefor disabled it. We recommend you to
+          We failed to run this plugin due to an unkown reason and have therefore disabled it. We recommend you to
           reinstall the plugin to make sure you are running a working version of this plugin.
         </p>
       );

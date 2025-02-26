@@ -4,7 +4,8 @@
   "id": "zipkin",
   "category": "tracing",
 
-  "metrics": false,
+  "backend": true,
+  "metrics": true,
   "alerting": false,
   "annotations": false,
   "logs": false,
@@ -26,6 +27,10 @@
         "name": "Learn more",
         "url": "https://zipkin.io"
       }
-    ]
+    ],
+    "version": "%VERSION%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=10.3.0-0"
   }
 }
