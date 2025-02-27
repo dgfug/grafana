@@ -1,40 +1,43 @@
-// Libraries
-import coreModule from 'app/core/core_module';
-// Services & Utils
-import { importDataSourcePlugin } from './plugin_loader';
 import {
-  GetDataSourceListFilters,
+  AppEvents,
+  DataSourceApi,
+  DataSourceInstanceSettings,
+  DataSourceRef,
+  DataSourceSelectItem,
+  ScopedVars,
+  matchPluginId,
+} from '@grafana/data';
+import {
   DataSourceSrv as DataSourceService,
+  getBackendSrv,
+  GetDataSourceListFilters,
   getDataSourceSrv as getDataSourceService,
+  getLegacyAngularInjector,
+  getTemplateSrv,
+  RuntimeDataSourceRegistration,
+  RuntimeDataSource,
   TemplateSrv,
 } from '@grafana/runtime';
-// Types
-import { AppEvents, DataSourceApi, DataSourceInstanceSettings, DataSourceSelectItem, ScopedVars } from '@grafana/data';
-import { auto } from 'angular';
-import { GrafanaRootScope } from 'app/routes/GrafanaCtrl';
-// Pretend Datasource
+import { ExpressionDatasourceRef, isExpressionReference } from '@grafana/runtime/src/utils/DataSourceWithBackend';
+import appEvents from 'app/core/app_events';
+import config from 'app/core/config';
 import {
   dataSource as expressionDatasource,
-  ExpressionDatasourceID,
-  ExpressionDatasourceUID,
   instanceSettings as expressionInstanceSettings,
 } from 'app/features/expressions/ExpressionDatasource';
-import { DataSourceVariableModel } from '../variables/types';
-import { cloneDeep } from 'lodash';
+import { ExpressionDatasourceUID } from 'app/features/expressions/types';
+
+import { importDataSourcePlugin } from './plugin_loader';
 
 export class DatasourceSrv implements DataSourceService {
-  private datasources: Record<string, DataSourceApi> = {};
+  private datasources: Record<string, DataSourceApi> = {}; // UID
   private settingsMapByName: Record<string, DataSourceInstanceSettings> = {};
   private settingsMapByUid: Record<string, DataSourceInstanceSettings> = {};
   private settingsMapById: Record<string, DataSourceInstanceSettings> = {};
-  private defaultName = '';
+  private runtimeDataSources: Record<string, RuntimeDataSource> = {}; //
+  private defaultName = ''; // actually UID
 
-  /** @ngInject */
-  constructor(
-    private $injector: auto.IInjectorService,
-    private $rootScope: GrafanaRootScope,
-    private templateSrv: TemplateSrv
-  ) {}
+  constructor(private templateSrv: TemplateSrv = getTemplateSrv()) {}
 
   init(settingsMapByName: Record<string, DataSourceInstanceSettings>, defaultName: string) {
     this.datasources = {};
@@ -43,28 +46,64 @@ export class DatasourceSrv implements DataSourceService {
     this.defaultName = defaultName;
 
     for (const dsSettings of Object.values(settingsMapByName)) {
+      if (!dsSettings.uid) {
+        dsSettings.uid = dsSettings.name; // -- Grafana --, -- Mixed etc
+      }
+
       this.settingsMapByUid[dsSettings.uid] = dsSettings;
       this.settingsMapById[dsSettings.id] = dsSettings;
     }
+
+    for (const ds of Object.values(this.runtimeDataSources)) {
+      this.datasources[ds.uid] = ds;
+      this.settingsMapByUid[ds.uid] = ds.instanceSettings;
+    }
+
+    // Preload expressions
+    this.datasources[ExpressionDatasourceRef.type] = expressionDatasource as any;
+    this.datasources[ExpressionDatasourceUID] = expressionDatasource as any;
+    this.settingsMapByUid[ExpressionDatasourceRef.uid] = expressionInstanceSettings;
+    this.settingsMapByUid[ExpressionDatasourceUID] = expressionInstanceSettings;
+  }
+
+  registerRuntimeDataSource(entry: RuntimeDataSourceRegistration): void {
+    if (this.runtimeDataSources[entry.dataSource.uid]) {
+      throw new Error(`A runtime data source with uid ${entry.dataSource.uid} has already been registered`);
+    }
+    if (this.settingsMapByUid[entry.dataSource.uid]) {
+      throw new Error(`A data source with uid ${entry.dataSource.uid} has already been registered`);
+    }
+
+    this.runtimeDataSources[entry.dataSource.uid] = entry.dataSource;
+    this.datasources[entry.dataSource.uid] = entry.dataSource;
+    this.settingsMapByUid[entry.dataSource.uid] = entry.dataSource.instanceSettings;
   }
 
   getDataSourceSettingsByUid(uid: string): DataSourceInstanceSettings | undefined {
     return this.settingsMapByUid[uid];
   }
 
-  getInstanceSettings(nameOrUid: string | null | undefined): DataSourceInstanceSettings | undefined {
-    if (nameOrUid === 'default' || nameOrUid === null || nameOrUid === undefined) {
-      return this.settingsMapByName[this.defaultName];
+  getInstanceSettings(
+    ref: string | null | undefined | DataSourceRef,
+    scopedVars?: ScopedVars
+  ): DataSourceInstanceSettings | undefined {
+    let nameOrUid = getNameOrUid(ref);
+
+    // Expressions has a new UID as __expr__ See: https://github.com/grafana/grafana/pull/62510/
+    // But we still have dashboards/panels with old expression UID (-100)
+    // To support both UIDs until we migrate them all to new one, this check is necessary
+    if (isExpressionReference(nameOrUid)) {
+      return expressionInstanceSettings;
     }
 
-    if (nameOrUid === ExpressionDatasourceID || nameOrUid === ExpressionDatasourceUID) {
-      return expressionInstanceSettings;
+    if (nameOrUid === 'default' || nameOrUid == null) {
+      return this.settingsMapByUid[this.defaultName] ?? this.settingsMapByName[this.defaultName];
     }
 
     // Complex logic to support template variable data source names
     // For this we just pick the current or first data source in the variable
     if (nameOrUid[0] === '$') {
-      const interpolatedName = this.templateSrv.replace(nameOrUid, {}, variableInterpolation);
+      const interpolatedName = this.templateSrv.replace(nameOrUid, scopedVars, variableInterpolation);
 
       let dsSettings;
 
@@ -77,27 +116,34 @@ export class DatasourceSrv implements DataSourceService {
       if (!dsSettings) {
         return undefined;
       }
-      // The return name or uid needs preservet string containing the variable
-      const clone = cloneDeep(dsSettings);
-      clone.name = nameOrUid;
-      // A data source being looked up using a variable should not be considered default
-      clone.isDefault = false;
 
-      return clone;
+      // Return an instance with un-interpolated values for name and uid
+      return {
+        ...dsSettings,
+        isDefault: false,
+        name: nameOrUid,
+        uid: nameOrUid,
+        rawRef: { type: dsSettings.type, uid: dsSettings.uid },
+      };
     }
 
-    return this.settingsMapByUid[nameOrUid] ?? this.settingsMapByName[nameOrUid];
+    return this.settingsMapByUid[nameOrUid] ?? this.settingsMapByName[nameOrUid] ?? this.settingsMapById[nameOrUid];
   }
 
-  get(nameOrUid?: string | null, scopedVars?: ScopedVars): Promise<DataSourceApi> {
+  get(ref?: string | DataSourceRef | null, scopedVars?: ScopedVars): Promise<DataSourceApi> {
+    let nameOrUid = getNameOrUid(ref);
     if (!nameOrUid) {
       return this.get(this.defaultName);
     }
 
+    if (isExpressionReference(ref)) {
+      return Promise.resolve(this.datasources[ExpressionDatasourceUID]);
+    }
+
     // Check if nameOrUid matches a uid and then get the name
-    const byUid = this.settingsMapByUid[nameOrUid];
-    if (byUid) {
-      nameOrUid = byUid.name;
+    const byName = this.settingsMapByName[nameOrUid];
+    if (byName) {
+      nameOrUid = byName.uid;
     }
 
     // This check is duplicated below, this is here mainly as performance optimization to skip interpolation
@@ -119,45 +165,58 @@ export class DatasourceSrv implements DataSourceService {
     return this.loadDatasource(nameOrUid);
   }
 
-  async loadDatasource(name: string): Promise<DataSourceApi<any, any>> {
-    // Expression Datasource (not a real datasource)
-    if (name === ExpressionDatasourceID || name === ExpressionDatasourceUID) {
-      this.datasources[name] = expressionDatasource as any;
-      return Promise.resolve(expressionDatasource);
+  async loadDatasource(key: string): Promise<DataSourceApi> {
+    if (this.datasources[key]) {
+      return Promise.resolve(this.datasources[key]);
     }
 
-    let dsConfig = this.settingsMapByName[name];
-    if (!dsConfig) {
-      dsConfig = this.settingsMapById[name];
-      if (!dsConfig) {
-        return Promise.reject({ message: `Datasource named ${name} was not found` });
-      }
+    // find the metadata
+    const instanceSettings = this.getInstanceSettings(key);
+    if (!instanceSettings) {
+      return Promise.reject({ message: `Datasource ${key} was not found` });
     }
 
     try {
-      const dsPlugin = await importDataSourcePlugin(dsConfig.meta);
+      const dsPlugin = await importDataSourcePlugin(instanceSettings.meta);
       // check if its in cache now
-      if (this.datasources[name]) {
-        return this.datasources[name];
+      if (this.datasources[key]) {
+        return this.datasources[key];
       }
 
       // If there is only one constructor argument it is instanceSettings
       const useAngular = dsPlugin.DataSourceClass.length !== 1;
-      const instance: DataSourceApi = useAngular
-        ? this.$injector.instantiate(dsPlugin.DataSourceClass, {
-            instanceSettings: dsConfig,
-          })
-        : new dsPlugin.DataSourceClass(dsConfig);
+      let instance: DataSourceApi;
+
+      if (useAngular) {
+        instance = getLegacyAngularInjector().instantiate(dsPlugin.DataSourceClass, {
+          instanceSettings,
+        });
+      } else {
+        instance = new dsPlugin.DataSourceClass(instanceSettings);
+      }
 
       instance.components = dsPlugin.components;
-      instance.meta = dsConfig.meta;
+
+      // Some old plugins does not extend DataSourceApi so we need to manually patch them
+      if (!(instance instanceof DataSourceApi)) {
+        const anyInstance = instance as any;
+        anyInstance.name = instanceSettings.name;
+        anyInstance.id = instanceSettings.id;
+        anyInstance.type = instanceSettings.type;
+        anyInstance.meta = instanceSettings.meta;
+        anyInstance.uid = instanceSettings.uid;
+        anyInstance.getRef = DataSourceApi.prototype.getRef;
+      }
 
       // store in instance cache
-      this.datasources[name] = instance;
+      this.datasources[key] = instance;
+      this.datasources[instance.uid] = instance;
       return instance;
     } catch (err) {
-      this.$rootScope.appEvent(AppEvents.alertError, [dsConfig.name + ' plugin failed', err.toString()]);
-      return Promise.reject({ message: `Datasource named ${name} was not found` });
+      if (err instanceof Error) {
+        appEvents.emit(AppEvents.alertError, [instanceSettings.name + ' plugin failed', err.toString()]);
+      }
+      return Promise.reject({ message: `Datasource: ${key} was not found` });
     }
   }
 
@@ -173,10 +232,10 @@ export class DatasourceSrv implements DataSourceService {
       if (filters.metrics && !x.meta.metrics) {
         return false;
       }
-      if (filters.alerting && !x.meta.alerting) {
+      if (filters.tracing && !x.meta.tracing) {
         return false;
       }
-      if (filters.tracing && !x.meta.tracing) {
+      if (filters.logs && x.meta.category !== 'logging' && !x.meta.logs) {
         return false;
       }
       if (filters.annotations && !x.meta.annotations) {
@@ -185,7 +244,7 @@ export class DatasourceSrv implements DataSourceService {
       if (filters.alerting && !x.meta.alerting) {
         return false;
       }
-      if (filters.pluginId && x.meta.id !== filters.pluginId) {
+      if (filters.pluginId && !matchPluginId(filters.pluginId, x.meta)) {
         return false;
       }
       if (filters.filter && !filters.filter(x)) {
@@ -208,17 +267,27 @@ export class DatasourceSrv implements DataSourceService {
     });
 
     if (filters.variables) {
-      for (const variable of this.templateSrv.getVariables().filter((variable) => variable.type === 'datasource')) {
-        const dsVar = variable as DataSourceVariableModel;
-        const first = dsVar.current.value === 'default' ? this.defaultName : dsVar.current.value;
-        const dsName = (first as unknown) as string;
-        const dsSettings = this.settingsMapByName[dsName];
+      for (const variable of this.templateSrv.getVariables()) {
+        if (variable.type !== 'datasource') {
+          continue;
+        }
+        let dsValue = variable.current.value === 'default' ? this.defaultName : variable.current.value;
+        // Support for multi-value DataSource (ds) variables
+        if (Array.isArray(dsValue)) {
+          // If the ds variable have multiple selected datasources
+          // We will use the first one
+          dsValue = dsValue[0];
+        }
+        const dsSettings =
+          !Array.isArray(dsValue) && (this.settingsMapByName[dsValue] || this.settingsMapByUid[dsValue]);
 
         if (dsSettings) {
           const key = `$\{${variable.name}\}`;
           base.push({
             ...dsSettings,
+            isDefault: false,
             name: key,
+            uid: key,
           });
         }
       }
@@ -236,15 +305,24 @@ export class DatasourceSrv implements DataSourceService {
 
     if (!filters.pluginId && !filters.alerting) {
       if (filters.mixed) {
-        base.push(this.getInstanceSettings('-- Mixed --')!);
+        const mixedInstanceSettings = this.getInstanceSettings('-- Mixed --');
+        if (mixedInstanceSettings) {
+          base.push(mixedInstanceSettings);
+        }
       }
 
       if (filters.dashboard) {
-        base.push(this.getInstanceSettings('-- Dashboard --')!);
+        const dashboardInstanceSettings = this.getInstanceSettings('-- Dashboard --');
+        if (dashboardInstanceSettings) {
+          base.push(dashboardInstanceSettings);
+        }
       }
 
       if (!filters.tracing) {
-        base.push(this.getInstanceSettings('-- Grafana --')!);
+        const grafanaInstanceSettings = this.getInstanceSettings('-- Grafana --');
+        if (grafanaInstanceSettings && filters.filter?.(grafanaInstanceSettings) !== false) {
+          base.push(grafanaInstanceSettings);
+        }
       }
     }
 
@@ -265,7 +343,7 @@ export class DatasourceSrv implements DataSourceService {
     return this.getList({ annotations: true, variables: true }).map((x) => {
       return {
         name: x.name,
-        value: x.isDefault ? null : x.name,
+        value: x.name,
         meta: x.meta,
       };
     });
@@ -278,14 +356,30 @@ export class DatasourceSrv implements DataSourceService {
     return this.getList({ metrics: true, variables: !options?.skipVariables }).map((x) => {
       return {
         name: x.name,
-        value: x.isDefault ? null : x.name,
+        value: x.name,
         meta: x.meta,
       };
     });
   }
+
+  async reload() {
+    const settings = await getBackendSrv().get('/api/frontend/settings');
+    config.datasources = settings.datasources;
+    config.defaultDatasource = settings.defaultDatasource;
+    this.init(settings.datasources, settings.defaultDatasource);
+  }
 }
 
-export function variableInterpolation(value: any[]) {
+export function getNameOrUid(ref?: string | DataSourceRef | null): string | undefined {
+  if (isExpressionReference(ref)) {
+    return ExpressionDatasourceRef.uid;
+  }
+
+  const isString = typeof ref === 'string';
+  return isString ? ref : ref?.uid;
+}
+
+export function variableInterpolation<T>(value: T | T[]) {
   if (Array.isArray(value)) {
     return value[0];
   }
@@ -295,6 +389,3 @@ export function variableInterpolation(value: any[]) {
 export const getDatasourceSrv = (): DatasourceSrv => {
   return getDataSourceService() as DatasourceSrv;
 };
-
-coreModule.service('datasourceSrv', DatasourceSrv);
-export default DatasourceSrv;

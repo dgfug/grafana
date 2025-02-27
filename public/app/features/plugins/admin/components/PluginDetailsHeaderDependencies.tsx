@@ -1,18 +1,20 @@
-import React from 'react';
 import { css } from '@emotion/css';
+import * as React from 'react';
+
 import { GrafanaTheme2 } from '@grafana/data';
-import { useStyles2, Icon } from '@grafana/ui';
+import { useStyles2, Icon, Stack } from '@grafana/ui';
+
 import { CatalogPlugin, PluginIconName } from '../types';
 
 type Props = {
   plugin: CatalogPlugin;
+  grafanaDependency?: string;
   className?: string;
 };
 
-export function PluginDetailsHeaderDependencies({ plugin, className }: Props): React.ReactElement | null {
+export function PluginDetailsHeaderDependencies({ plugin, grafanaDependency }: Props): React.ReactElement | null {
   const styles = useStyles2(getStyles);
   const pluginDependencies = plugin.details?.pluginDependencies;
-  const grafanaDependency = plugin.details?.grafanaDependency;
   const hasNoDependencyInfo = !grafanaDependency && (!pluginDependencies || !pluginDependencies.length);
 
   if (hasNoDependencyInfo) {
@@ -20,12 +22,10 @@ export function PluginDetailsHeaderDependencies({ plugin, className }: Props): R
   }
 
   return (
-    <div className={className}>
-      <div className={styles.dependencyTitle}>Dependencies:</div>
-
+    <Stack gap={1}>
       {/* Grafana dependency */}
       {Boolean(grafanaDependency) && (
-        <div>
+        <div className={styles.depBadge}>
           <Icon name="grafana" className={styles.icon} />
           Grafana {grafanaDependency}
         </div>
@@ -36,7 +36,7 @@ export function PluginDetailsHeaderDependencies({ plugin, className }: Props): R
         <div>
           {pluginDependencies.map((p) => {
             return (
-              <span key={p.name}>
+              <span className={styles.depBadge} key={p.name}>
                 <Icon name={PluginIconName[p.type]} className={styles.icon} />
                 {p.name} {p.version}
               </span>
@@ -44,24 +44,27 @@ export function PluginDetailsHeaderDependencies({ plugin, className }: Props): R
           })}
         </div>
       )}
-    </div>
+    </Stack>
   );
 }
 
 export const getStyles = (theme: GrafanaTheme2) => {
   return {
-    dependencyTitle: css`
-      font-weight: ${theme.typography.fontWeightBold};
-      margin-right: ${theme.spacing(0.5)};
+    dependencyTitle: css({
+      marginRight: theme.spacing(0.5),
 
-      &::after {
-        content: '';
-        padding: 0;
-      }
-    `,
-    icon: css`
-      color: ${theme.colors.text.secondary};
-      margin-right: ${theme.spacing(0.5)};
-    `,
+      '&::after': {
+        content: "''",
+        padding: 0,
+      },
+    }),
+    depBadge: css({
+      display: 'flex',
+      alignItems: 'flex-start',
+    }),
+    icon: css({
+      color: theme.colors.text.secondary,
+      marginRight: theme.spacing(0.5),
+    }),
   };
 };

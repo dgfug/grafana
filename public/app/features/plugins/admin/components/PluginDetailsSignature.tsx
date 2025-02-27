@@ -1,7 +1,9 @@
-import React from 'react';
+import * as React from 'react';
+
+import { PluginErrorCode, PluginSignatureStatus } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
-import { PluginSignatureStatus } from '@grafana/data';
 import { Alert } from '@grafana/ui';
+
 import { CatalogPlugin } from '../types';
 
 type Props = {
@@ -13,9 +15,10 @@ type Props = {
 export function PluginDetailsSignature({ className, plugin }: Props): React.ReactElement | null {
   const isSignatureValid = plugin.signature === PluginSignatureStatus.valid;
   const isCore = plugin.signature === PluginSignatureStatus.internal;
+  const isDisabled = plugin.isDisabled && isDisabledDueTooSignatureError(plugin.error);
 
   // The basic information is already available in the header
-  if (isSignatureValid || isCore) {
+  if (isSignatureValid || isCore || isDisabled) {
     return null;
   }
 
@@ -23,7 +26,7 @@ export function PluginDetailsSignature({ className, plugin }: Props): React.Reac
     <Alert
       severity="warning"
       title="Invalid plugin signature"
-      aria-label={selectors.pages.PluginPage.signatureInfo}
+      data-testid={selectors.pages.PluginPage.signatureInfo}
       className={className}
     >
       <p>
@@ -42,4 +45,19 @@ export function PluginDetailsSignature({ className, plugin }: Props): React.Reac
       </a>
     </Alert>
   );
+}
+
+function isDisabledDueTooSignatureError(error: PluginErrorCode | undefined) {
+  // If the plugin is disabled due to signature error we rely on the disabled
+  // error message instad of the warning about the signature.
+
+  switch (error) {
+    case PluginErrorCode.invalidSignature:
+    case PluginErrorCode.missingSignature:
+    case PluginErrorCode.modifiedSignature:
+      return true;
+
+    default:
+      return false;
+  }
 }
