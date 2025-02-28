@@ -1,85 +1,69 @@
-import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { css } from '@emotion/css';
-import { GrafanaTheme, PanelPluginMeta, SelectableValue } from '@grafana/data';
-import { Button, CustomScrollbar, Icon, Input, RadioButtonGroup, useStyles } from '@grafana/ui';
-import { changePanelPlugin } from '../../state/actions';
-import { PanelModel } from '../../state/PanelModel';
-import { useDispatch, useSelector } from 'react-redux';
-import { filterPluginList, getAllPanelPluginMeta, VizTypePicker } from '../VizTypePicker/VizTypePicker';
-import { Field } from '@grafana/ui/src/components/Forms/Field';
-import { PanelLibraryOptionsGroup } from 'app/features/library-panels/components/PanelLibraryOptionsGroup/PanelLibraryOptionsGroup';
-import { toggleVizPicker } from './state/reducers';
+import { useCallback, useRef, useState } from 'react';
+import { useLocalStorage } from 'react-use';
+
+import { GrafanaTheme2, PanelData, SelectableValue } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
+import { Button, FilterInput, RadioButtonGroup, ScrollContainer, useStyles2 } from '@grafana/ui';
+import { Field } from '@grafana/ui/src/components/Forms/Field';
+import { LS_VISUALIZATION_SELECT_TAB_KEY } from 'app/core/constants';
+import { PanelLibraryOptionsGroup } from 'app/features/library-panels/components/PanelLibraryOptionsGroup/PanelLibraryOptionsGroup';
+import { VisualizationSuggestions } from 'app/features/panel/components/VizTypePicker/VisualizationSuggestions';
+import { VizTypeChangeDetails } from 'app/features/panel/components/VizTypePicker/types';
+import { useDispatch, useSelector } from 'app/types';
+
+import { VizTypePicker } from '../../../panel/components/VizTypePicker/VizTypePicker';
+import { changePanelPlugin } from '../../../panel/state/actions';
+import { PanelModel } from '../../state/PanelModel';
 import { getPanelPluginWithFallback } from '../../state/selectors';
+
+import { toggleVizPicker } from './state/reducers';
+import { VisualizationSelectPaneTab } from './types';
 
 interface Props {
   panel: PanelModel;
+  data?: PanelData;
 }
 
-export const VisualizationSelectPane: FC<Props> = ({ panel }) => {
+export const VisualizationSelectPane = ({ panel, data }: Props) => {
   const plugin = useSelector(getPanelPluginWithFallback(panel.type));
   const [searchQuery, setSearchQuery] = useState('');
-  const [listMode, setListMode] = useState(ListMode.Visualizations);
+
+  const tabKey = LS_VISUALIZATION_SELECT_TAB_KEY;
+  const defaultTab = VisualizationSelectPaneTab.Visualizations;
+
+  const [listMode, setListMode] = useLocalStorage(tabKey, defaultTab);
+
   const dispatch = useDispatch();
-  const styles = useStyles(getStyles);
+  const styles = useStyles2(getStyles);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  const onPluginTypeChange = useCallback(
-    (meta: PanelPluginMeta, withModKey: boolean) => {
-      if (meta.id !== plugin.meta.id) {
-        dispatch(changePanelPlugin(panel, meta.id));
-      }
+  const onVizChange = useCallback(
+    (pluginChange: VizTypeChangeDetails) => {
+      dispatch(changePanelPlugin({ panel: panel, ...pluginChange }));
 
       // close viz picker unless a mod key is pressed while clicking
-      if (!withModKey) {
+      if (!pluginChange.withModKey) {
         dispatch(toggleVizPicker(false));
       }
     },
-    [dispatch, panel, plugin.meta.id]
+    [dispatch, panel]
   );
-
-  // Give Search input focus when using radio button switch list mode
-  useEffect(() => {
-    if (searchRef.current) {
-      searchRef.current.focus();
-    }
-  }, [listMode]);
 
   const onCloseVizPicker = () => {
     dispatch(toggleVizPicker(false));
   };
 
-  const onKeyPress = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        const query = e.currentTarget.value;
-        const plugins = getAllPanelPluginMeta();
-        const match = filterPluginList(plugins, query, plugin.meta);
-
-        if (match && match.length) {
-          onPluginTypeChange(match[0], false);
-        }
-      }
-    },
-    [onPluginTypeChange, plugin.meta]
-  );
-
-  const suffix =
-    searchQuery !== '' ? (
-      <Button icon="times" fill="text" size="sm" onClick={() => setSearchQuery('')}>
-        Clear
-      </Button>
-    ) : null;
-
   if (!plugin) {
     return null;
   }
 
-  const radioOptions: Array<SelectableValue<ListMode>> = [
-    { label: 'Visualizations', value: ListMode.Visualizations },
+  const radioOptions: Array<SelectableValue<VisualizationSelectPaneTab>> = [
+    { label: 'Visualizations', value: VisualizationSelectPaneTab.Visualizations },
+    { label: 'Suggestions', value: VisualizationSelectPaneTab.Suggestions },
     {
       label: 'Library panels',
-      value: ListMode.LibraryPanels,
+      value: VisualizationSelectPaneTab.LibraryPanels,
       description: 'Reusable panels you can share between multiple dashboards.',
     },
   ];
@@ -88,13 +72,11 @@ export const VisualizationSelectPane: FC<Props> = ({ panel }) => {
     <div className={styles.openWrapper}>
       <div className={styles.formBox}>
         <div className={styles.searchRow}>
-          <Input
+          <FilterInput
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.currentTarget.value)}
-            onKeyPress={onKeyPress}
-            prefix={<Icon name="search" />}
-            suffix={suffix}
+            onChange={setSearchQuery}
             ref={searchRef}
+            autoFocus={true}
             placeholder="Search for..."
           />
           <Button
@@ -111,75 +93,68 @@ export const VisualizationSelectPane: FC<Props> = ({ panel }) => {
         </Field>
       </div>
       <div className={styles.scrollWrapper}>
-        <CustomScrollbar autoHeightMin="100%">
+        <ScrollContainer>
           <div className={styles.scrollContent}>
-            {listMode === ListMode.Visualizations && (
-              <VizTypePicker
-                current={plugin.meta}
-                onTypeChange={onPluginTypeChange}
-                searchQuery={searchQuery}
-                onClose={() => {}}
-              />
+            {listMode === VisualizationSelectPaneTab.Visualizations && (
+              <VizTypePicker pluginId={plugin.meta.id} onChange={onVizChange} searchQuery={searchQuery} />
             )}
-            {listMode === ListMode.LibraryPanels && (
+            {listMode === VisualizationSelectPaneTab.Suggestions && (
+              <VisualizationSuggestions onChange={onVizChange} searchQuery={searchQuery} panel={panel} data={data} />
+            )}
+            {listMode === VisualizationSelectPaneTab.LibraryPanels && (
               <PanelLibraryOptionsGroup searchQuery={searchQuery} panel={panel} key="Panel Library" />
             )}
           </div>
-        </CustomScrollbar>
+        </ScrollContainer>
       </div>
     </div>
   );
 };
 
-enum ListMode {
-  Visualizations,
-  LibraryPanels,
-}
-
 VisualizationSelectPane.displayName = 'VisualizationSelectPane';
 
-const getStyles = (theme: GrafanaTheme) => {
+const getStyles = (theme: GrafanaTheme2) => {
   return {
-    icon: css`
-      color: ${theme.palette.gray33};
-    `,
-    wrapper: css`
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 0;
-      height: 100%;
-    `,
-    vizButton: css`
-      text-align: left;
-    `,
-    scrollWrapper: css`
-      flex-grow: 1;
-      min-height: 0;
-    `,
-    scrollContent: css`
-      padding: ${theme.spacing.sm};
-    `,
-    openWrapper: css`
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 100%;
-      height: 100%;
-      background: ${theme.colors.bg1};
-      border: 1px solid ${theme.colors.border1};
-    `,
-    searchRow: css`
-      display: flex;
-      margin-bottom: ${theme.spacing.sm};
-    `,
-    closeButton: css`
-      margin-left: ${theme.spacing.sm};
-    `,
-    customFieldMargin: css`
-      margin-bottom: ${theme.spacing.sm};
-    `,
-    formBox: css`
-      padding: ${theme.spacing.sm};
-      padding-bottom: 0;
-    `,
+    icon: css({
+      color: theme.v1.palette.gray33,
+    }),
+    wrapper: css({
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      height: '100%',
+    }),
+    vizButton: css({
+      textAlign: 'left',
+    }),
+    scrollWrapper: css({
+      flexGrow: 1,
+      minHeight: 0,
+    }),
+    scrollContent: css({
+      padding: theme.spacing(1),
+    }),
+    openWrapper: css({
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 100%',
+      height: '100%',
+      background: theme.colors.background.primary,
+      border: `1px solid ${theme.colors.border.weak}`,
+    }),
+    searchRow: css({
+      display: 'flex',
+      marginBottom: theme.spacing(1),
+    }),
+    closeButton: css({
+      marginLeft: theme.spacing(1),
+    }),
+    customFieldMargin: css({
+      marginBottom: theme.spacing(1),
+    }),
+    formBox: css({
+      padding: theme.spacing(1),
+      paddingBottom: 0,
+    }),
   };
 };

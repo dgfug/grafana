@@ -1,11 +1,14 @@
-import React, { memo, useCallback } from 'react';
-import { MatcherUIProps, FieldMatcherUIRegistryItem } from './types';
+import { memo, useCallback } from 'react';
+
 import { FieldMatcherID, fieldMatchers, SelectableValue } from '@grafana/data';
+
 import { Select } from '../Select/Select';
+
+import { MatcherUIProps, FieldMatcherUIRegistryItem } from './types';
 import { useFieldDisplayNames, useSelectOptions, frameHasName } from './utils';
 
 export const FieldNameMatcherEditor = memo<MatcherUIProps<string>>((props) => {
-  const { data, options, onChange: onChangeFromProps } = props;
+  const { data, options, onChange: onChangeFromProps, id } = props;
   const names = useFieldDisplayNames(data);
   const selectOptions = useSelectOptions(names, options);
 
@@ -20,7 +23,7 @@ export const FieldNameMatcherEditor = memo<MatcherUIProps<string>>((props) => {
   );
 
   const selectedOption = selectOptions.find((v) => v.value === options);
-  return <Select menuShouldPortal value={selectedOption} options={selectOptions} onChange={onChange} />;
+  return <Select value={selectedOption} options={selectOptions} onChange={onChange} inputId={id} />;
 });
 FieldNameMatcherEditor.displayName = 'FieldNameMatcherEditor';
 
