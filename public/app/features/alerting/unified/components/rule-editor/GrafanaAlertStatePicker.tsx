@@ -1,25 +1,32 @@
+import { useMemo } from 'react';
+
 import { SelectableValue } from '@grafana/data';
 import { Select } from '@grafana/ui';
 import { SelectBaseProps } from '@grafana/ui/src/components/Select/types';
 import { GrafanaAlertStateDecision } from 'app/types/unified-alerting-dto';
-import React, { FC, useMemo } from 'react';
 
 type Props = Omit<SelectBaseProps<GrafanaAlertStateDecision>, 'options'> & {
   includeNoData: boolean;
+  includeError: boolean;
 };
 
 const options: SelectableValue[] = [
   { value: GrafanaAlertStateDecision.Alerting, label: 'Alerting' },
   { value: GrafanaAlertStateDecision.NoData, label: 'No Data' },
-  { value: GrafanaAlertStateDecision.OK, label: 'OK' },
+  { value: GrafanaAlertStateDecision.OK, label: 'Normal' },
+  { value: GrafanaAlertStateDecision.Error, label: 'Error' },
+  { value: GrafanaAlertStateDecision.KeepLast, label: 'Keep Last State' },
 ];
 
-export const GrafanaAlertStatePicker: FC<Props> = ({ includeNoData, ...props }) => {
+export const GrafanaAlertStatePicker = ({ includeNoData, includeError, ...props }: Props) => {
   const opts = useMemo(() => {
-    if (includeNoData) {
-      return options;
+    if (!includeNoData) {
+      return options.filter((opt) => opt.value !== GrafanaAlertStateDecision.NoData);
     }
-    return options.filter((opt) => opt.value !== GrafanaAlertStateDecision.NoData);
-  }, [includeNoData]);
-  return <Select menuShouldPortal options={opts} {...props} />;
+    if (!includeError) {
+      return options.filter((opt) => opt.value !== GrafanaAlertStateDecision.Error);
+    }
+    return options;
+  }, [includeNoData, includeError]);
+  return <Select options={opts} {...props} />;
 };

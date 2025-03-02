@@ -1,5 +1,7 @@
 import { Feature } from 'ol';
-import { ComparisonOperation } from '../types';
+
+import { ComparisonOperation } from '@grafana/schema';
+
 import { checkFeatureMatchesStyleRule } from './checkFeatureMatchesStyleRule';
 
 describe('check if feature matches style rule', () => {
@@ -14,6 +16,16 @@ describe('check if feature matches style rule', () => {
           operation: ComparisonOperation.EQ,
           property: 'number',
           value: 3,
+        },
+        feature
+      )
+    ).toEqual(true);
+    expect(
+      checkFeatureMatchesStyleRule(
+        {
+          operation: ComparisonOperation.EQ,
+          property: 'number',
+          value: '3',
         },
         feature
       )
@@ -58,6 +70,16 @@ describe('check if feature matches style rule', () => {
         feature
       )
     ).toEqual(true);
+    expect(
+      checkFeatureMatchesStyleRule(
+        {
+          operation: ComparisonOperation.NEQ,
+          property: 'number',
+          value: 3,
+        },
+        feature
+      )
+    ).toEqual(false);
   });
   it('can compare with strings', () => {
     const feature = new Feature({
@@ -114,6 +136,16 @@ describe('check if feature matches style rule', () => {
         feature
       )
     ).toEqual(true);
+    expect(
+      checkFeatureMatchesStyleRule(
+        {
+          operation: ComparisonOperation.NEQ,
+          property: 'string',
+          value: 'b',
+        },
+        feature
+      )
+    ).toEqual(false);
   });
   it('can compare with booleans', () => {
     const feature = new Feature({
@@ -172,5 +204,15 @@ describe('check if feature matches style rule', () => {
         feature
       )
     ).toEqual(true);
+    expect(
+      checkFeatureMatchesStyleRule(
+        {
+          operation: ComparisonOperation.NEQ,
+          property: 'boolean',
+          value: false,
+        },
+        feature
+      )
+    ).toEqual(false);
   });
 });

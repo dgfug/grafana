@@ -1,27 +1,25 @@
-import React, { FC, useCallback, useState } from 'react';
-import { useDispatch } from 'react-redux';
 import { css } from '@emotion/css';
-import { GrafanaTheme2, PanelPluginMeta } from '@grafana/data';
-import { Button, useStyles2, VerticalGroup } from '@grafana/ui';
+import { useCallback, useState } from 'react';
 
-import { PanelModel } from 'app/features/dashboard/state';
-import { AddLibraryPanelModal } from '../AddLibraryPanelModal/AddLibraryPanelModal';
-import { LibraryPanelsView } from '../LibraryPanelsView/LibraryPanelsView';
-import { PanelDirectiveReadyEvent, PanelOptionsChangedEvent, PanelQueriesChangedEvent } from 'app/types/events';
-import { LibraryElementDTO } from '../../types';
-import { toPanelModelLibraryPanel } from '../../utils';
-import { changePanelPlugin } from 'app/features/dashboard/state/actions';
+import { PanelPluginMeta } from '@grafana/data';
+import { Button, VerticalGroup } from '@grafana/ui';
 import { getDashboardSrv } from 'app/features/dashboard/services/DashboardSrv';
-import { ChangeLibraryPanelModal } from '../ChangeLibraryPanelModal/ChangeLibraryPanelModal';
+import { PanelModel } from 'app/features/dashboard/state/PanelModel';
+import { changeToLibraryPanel } from 'app/features/panel/state/actions';
+import { useDispatch } from 'app/types';
+
 import { PanelTypeFilter } from '../../../../core/components/PanelTypeFilter/PanelTypeFilter';
+import { LibraryElementDTO } from '../../types';
+import { AddLibraryPanelModal } from '../AddLibraryPanelModal/AddLibraryPanelModal';
+import { ChangeLibraryPanelModal } from '../ChangeLibraryPanelModal/ChangeLibraryPanelModal';
+import { LibraryPanelsView } from '../LibraryPanelsView/LibraryPanelsView';
 
 interface Props {
   panel: PanelModel;
   searchQuery: string;
 }
 
-export const PanelLibraryOptionsGroup: FC<Props> = ({ panel, searchQuery }) => {
-  const styles = useStyles2(getStyles);
+export const PanelLibraryOptionsGroup = ({ panel, searchQuery }: Props) => {
   const [showingAddPanelModal, setShowingAddPanelModal] = useState(false);
   const [changeToPanel, setChangeToPanel] = useState<LibraryElementDTO | undefined>(undefined);
   const [panelFilter, setPanelFilter] = useState<string[]>([]);
@@ -38,43 +36,13 @@ export const PanelLibraryOptionsGroup: FC<Props> = ({ panel, searchQuery }) => {
     if (!changeToPanel) {
       return;
     }
+
     setChangeToPanel(undefined);
-
-    const panelTypeChanged = panel.type !== changeToPanel.model.type;
-
-    if (panelTypeChanged) {
-      await dispatch(changePanelPlugin(panel, changeToPanel.model.type));
-    }
-
-    panel.restoreModel({
-      ...changeToPanel.model,
-      gridPos: panel.gridPos,
-      id: panel.id,
-      libraryPanel: toPanelModelLibraryPanel(changeToPanel),
-    });
-
-    panel.configRev = 0;
-    panel.refresh();
-    const unsubscribeEvent = panel.events.subscribe(PanelDirectiveReadyEvent, () => {
-      panel.refresh();
-      unsubscribeEvent.unsubscribe();
-    });
-    panel.events.publish(PanelQueriesChangedEvent);
-    panel.events.publish(PanelOptionsChangedEvent);
+    dispatch(changeToLibraryPanel(panel, changeToPanel));
   };
 
-  const onAddToPanelLibrary = () => {
-    setShowingAddPanelModal(true);
-  };
-
-  const onChangeLibraryPanel = (panel: LibraryElementDTO) => {
-    setChangeToPanel(panel);
-  };
-
-  const onDismissChangeToPanel = () => {
-    setChangeToPanel(undefined);
-  };
-
+  const onAddToPanelLibrary = () => setShowingAddPanelModal(true);
+  const onDismissChangeToPanel = () => setChangeToPanel(undefined);
   return (
     <VerticalGroup spacing="md">
       {!panel.libraryPanel && (
@@ -92,7 +60,7 @@ export const PanelLibraryOptionsGroup: FC<Props> = ({ panel, searchQuery }) => {
           currentPanelId={panel.libraryPanel?.uid}
           searchString={searchQuery}
           panelFilter={panelFilter}
-          onClickCard={onChangeLibraryPanel}
+          onClickCard={setChangeToPanel}
           showSecondaryActions
         />
       </div>
@@ -101,7 +69,7 @@ export const PanelLibraryOptionsGroup: FC<Props> = ({ panel, searchQuery }) => {
         <AddLibraryPanelModal
           panel={panel}
           onDismiss={() => setShowingAddPanelModal(false)}
-          initialFolderId={dashboard?.meta.folderId}
+          initialFolderUid={dashboard?.meta.folderUid}
           isOpen={showingAddPanelModal}
         />
       )}
@@ -113,10 +81,8 @@ export const PanelLibraryOptionsGroup: FC<Props> = ({ panel, searchQuery }) => {
   );
 };
 
-const getStyles = (theme: GrafanaTheme2) => {
-  return {
-    libraryPanelsView: css`
-      width: 100%;
-    `,
-  };
+const styles = {
+  libraryPanelsView: css({
+    width: '100%',
+  }),
 };

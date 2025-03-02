@@ -1,6 +1,6 @@
 import { PanelModel, FieldConfigSource } from '@grafana/data';
-import { mapPanelChangedHandler } from './migrations';
 
+import { mapMigrationHandler, mapPanelChangedHandler } from './migrations';
 describe('Worldmap Migrations', () => {
   let prevFieldConfig: FieldConfigSource;
 
@@ -12,56 +12,116 @@ describe('Worldmap Migrations', () => {
   });
 
   it('simple worldmap', () => {
-    const old: any = {
+    const old = {
       angular: simpleWorldmapConfig,
     };
     const panel = {} as PanelModel;
     panel.options = mapPanelChangedHandler(panel, 'grafana-worldmap-panel', old, prevFieldConfig);
     expect(panel).toMatchInlineSnapshot(`
-      Object {
-        "fieldConfig": Object {
-          "defaults": Object {
+      {
+        "fieldConfig": {
+          "defaults": {
             "decimals": 3,
-            "thresholds": Object {
+            "thresholds": {
               "mode": "absolute",
-              "steps": Array [
-                Object {
+              "steps": [
+                {
                   "color": "#37872D",
                   "value": -Infinity,
                 },
-                Object {
+                {
                   "color": "#E0B400",
                   "value": 0,
                 },
-                Object {
+                {
                   "color": "#C4162A",
                   "value": 50,
                 },
-                Object {
+                {
                   "color": "#8F3BB8",
                   "value": 100,
                 },
               ],
             },
           },
-          "overrides": Array [],
+          "overrides": [],
         },
-        "options": Object {
-          "basemap": Object {
+        "options": {
+          "basemap": {
+            "name": "Basemap",
             "type": "default",
           },
-          "controls": Object {
+          "controls": {
             "mouseWheelZoom": true,
             "showZoom": true,
           },
-          "layers": Array [],
-          "view": Object {
+          "layers": [
+            {
+              "config": {
+                "showLegend": true,
+                "style": {
+                  "color": {
+                    "fixed": "dark-green",
+                  },
+                  "opacity": 0.4,
+                  "rotation": {
+                    "fixed": 0,
+                    "max": 360,
+                    "min": -360,
+                    "mode": "mod",
+                  },
+                  "size": {
+                    "fixed": 5,
+                    "max": 30,
+                    "min": 2,
+                  },
+                  "symbol": {
+                    "fixed": "img/icons/marker/circle.svg",
+                    "mode": "fixed",
+                  },
+                  "symbolAlign": {
+                    "horizontal": "center",
+                    "vertical": "center",
+                  },
+                  "textConfig": {
+                    "fontSize": 12,
+                    "offsetX": 0,
+                    "offsetY": 0,
+                    "textAlign": "center",
+                    "textBaseline": "middle",
+                  },
+                },
+              },
+              "location": {
+                "gazetteer": "public/gazetteer/countries.json",
+                "lookup": undefined,
+                "mode": "lookup",
+              },
+              "name": "",
+              "tooltip": true,
+              "type": "markers",
+            },
+          ],
+          "tooltip": {
+            "mode": "details",
+          },
+          "view": {
             "id": "europe",
             "lat": 46,
             "lon": 14,
             "zoom": 6,
           },
         },
+        "transformations": [
+          {
+            "id": "reduce",
+            "options": {
+              "reducers": [
+                "sum",
+              ],
+            },
+          },
+        ],
       }
     `);
   });
@@ -106,3 +166,86 @@ const simpleWorldmapConfig = {
   valueName: 'total',
   datasource: null,
 };
+
+describe('geomap migrations', () => {
+  it('updates marker', () => {
+    const panel = {
+      type: 'geomap',
+      options: {
+        layers: [
+          {
+            type: 'markers',
+            config: {
+              size: {
+                fixed: 5,
+                min: 2,
+                max: 15,
+                field: 'Count',
+              },
+              color: {
+                fixed: 'dark-green',
+                field: 'Price',
+              },
+              fillOpacity: 0.4,
+              shape: 'triangle',
+              showLegend: true,
+            },
+          },
+        ],
+      },
+      pluginVersion: '8.2.0',
+    } as unknown as PanelModel;
+    panel.options = mapMigrationHandler(panel);
+
+    expect(panel).toMatchInlineSnapshot(`
+      {
+        "options": {
+          "layers": [
+            {
+              "config": {
+                "showLegend": true,
+                "style": {
+                  "color": {
+                    "field": "Price",
+                    "fixed": "dark-green",
+                  },
+                  "opacity": 0.4,
+                  "rotation": {
+                    "fixed": 0,
+                    "max": 360,
+                    "min": -360,
+                    "mode": "mod",
+                  },
+                  "size": {
+                    "field": "Count",
+                    "fixed": 5,
+                    "max": 15,
+                    "min": 2,
+                  },
+                  "symbol": {
+                    "fixed": "img/icons/marker/triangle.svg",
+                    "mode": "fixed",
+                  },
+                  "symbolAlign": {
+                    "horizontal": "center",
+                    "vertical": "center",
+                  },
+                  "textConfig": {
+                    "fontSize": 12,
+                    "offsetX": 0,
+                    "offsetY": 0,
+                    "textAlign": "center",
+                    "textBaseline": "middle",
+                  },
+                },
+              },
+              "type": "markers",
+            },
+          ],
+        },
+        "pluginVersion": "8.2.0",
+        "type": "geomap",
+      }
+    `);
+  });
+});
