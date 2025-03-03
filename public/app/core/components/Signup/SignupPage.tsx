@@ -1,10 +1,13 @@
-import React, { FC } from 'react';
-import { Form, Field, Input, Button, HorizontalGroup, LinkButton, FormAPI } from '@grafana/ui';
-import { getConfig } from 'app/core/config';
+import { useForm } from 'react-hook-form';
+
 import { getBackendSrv } from '@grafana/runtime';
-import appEvents from 'app/core/app_events';
-import { AppEvents } from '@grafana/data';
+import { Field, Input, Button, LinkButton, Stack } from '@grafana/ui';
+import { getConfig } from 'app/core/config';
+import { useAppNotification } from 'app/core/copy/appNotification';
+import { Trans } from 'app/core/internationalization';
 import { GrafanaRouteComponentProps } from 'app/core/navigation/types';
+import { w3cStandardEmailValidator } from 'app/features/admin/utils';
+
 import { InnerBox, LoginLayout } from '../Login/LoginLayout';
 import { PasswordField } from '../PasswordField/PasswordField';
 
@@ -25,7 +28,15 @@ interface QueryParams {
 
 interface Props extends GrafanaRouteComponentProps<{}, QueryParams> {}
 
-export const SignupPage: FC<Props> = (props) => {
+export const SignupPage = ({ queryParams }: Props) => {
+  const notifyApp = useAppNotification();
+  const {
+    handleSubmit,
+    formState: { errors },
+    register,
+    getValues,
+  } = useForm<SignupDTO>({ defaultValues: { email: queryParams.email, code: queryParams.code } });
+
   const onSubmit = async (formData: SignupDTO) => {
     if (formData.name === '') {
       delete formData.name;
@@ -43,7 +54,7 @@ export const SignupPage: FC<Props> = (props) => {
       })
       .catch((err) => {
         const msg = err.data?.message || err;
-        appEvents.emit(AppEvents.alertWarning, [msg]);
+        notifyApp.warning(msg);
       });
 
     if (response.code === 'redirect-to-select-org') {
@@ -52,72 +63,65 @@ export const SignupPage: FC<Props> = (props) => {
     window.location.assign(getConfig().appSubUrl + '/');
   };
 
-  const defaultValues = {
-    email: props.queryParams.email,
-    code: props.queryParams.code,
-  };
-
   return (
     <LoginLayout>
       <InnerBox>
-        <Form defaultValues={defaultValues} onSubmit={onSubmit}>
-          {({ errors, register, getValues }: FormAPI<SignupDTO>) => (
-            <>
-              <Field label="Your name">
-                <Input id="user-name" {...register('name')} placeholder="(optional)" />
-              </Field>
-              <Field label="Email" invalid={!!errors.email} error={errors.email?.message}>
-                <Input
-                  id="email"
-                  {...register('email', {
-                    required: 'Email is required',
-                    pattern: {
-                      value: /^\S+@\S+$/,
-                      message: 'Email is invalid',
-                    },
-                  })}
-                  type="email"
-                  placeholder="Email"
-                />
-              </Field>
-              {!getConfig().autoAssignOrg && (
-                <Field label="Org. name">
-                  <Input id="org-name" {...register('orgName')} placeholder="Org. name" />
-                </Field>
-              )}
-              {getConfig().verifyEmailEnabled && (
-                <Field label="Email verification code (sent to your email)">
-                  <Input id="verification-code" {...register('code')} placeholder="Code" />
-                </Field>
-              )}
-              <Field label="Password" invalid={!!errors.password} error={errors?.password?.message}>
-                <PasswordField
-                  id="new-password"
-                  autoFocus
-                  autoComplete="new-password"
-                  {...register('password', { required: 'Password is required' })}
-                />
-              </Field>
-              <Field label="Confirm password" invalid={!!errors.confirm} error={errors?.confirm?.message}>
-                <PasswordField
-                  id="confirm-new-password"
-                  autoComplete="new-password"
-                  {...register('confirm', {
-                    required: 'Confirmed password is required',
-                    validate: (v) => v === getValues().password || 'Passwords must match!',
-                  })}
-                />
-              </Field>
-
-              <HorizontalGroup>
-                <Button type="submit">Submit</Button>
-                <LinkButton fill="text" href={getConfig().appSubUrl + '/login'}>
-                  Back to login
-                </LinkButton>
-              </HorizontalGroup>
-            </>
+        <form onSubmit={handleSubmit(onSubmit)} style={{ width: '100%' }}>
+          <Field label="Your name">
+            <Input id="user-name" {...register('name')} placeholder="(optional)" />
+          </Field>
+          <Field label="Email" invalid={!!errors.email} error={errors.email?.message}>
+            <Input
+              id="email"
+              {...register('email', {
+                required: 'Email is required',
+                pattern: {
+                  value: w3cStandardEmailValidator,
+                  message: 'Email is invalid',
+                },
+              })}
+              type="email"
+              placeholder="Email"
+            />
+          </Field>
+          {!getConfig().autoAssignOrg && (
+            <Field label="Org. name">
+              <Input id="org-name" {...register('orgName')} placeholder="Org. name" />
+            </Field>
           )}
-        </Form>
+          {getConfig().verifyEmailEnabled && (
+            <Field label="Email verification code (sent to your email)">
+              <Input id="verification-code" {...register('code')} placeholder="Code" />
+            </Field>
+          )}
+          <Field label="Password" invalid={!!errors.password} error={errors?.password?.message}>
+            <PasswordField
+              id="new-password"
+              autoFocus
+              autoComplete="new-password"
+              {...register('password', { required: 'Password is required' })}
+            />
+          </Field>
+          <Field label="Confirm password" invalid={!!errors.confirm} error={errors?.confirm?.message}>
+            <PasswordField
+              id="confirm-new-password"
+              autoComplete="new-password"
+              {...register('confirm', {
+                required: 'Confirmed password is required',
+                validate: (v) => v === getValues().password || 'Passwords must match!',
+              })}
+            />
+          </Field>
+
+          <Stack>
+            <Button type="submit">
+              <Trans i18nKey="sign-up.submit-button">Submit</Trans>
+            </Button>
+            <LinkButton fill="text" href={getConfig().appSubUrl + '/login'}>
+              <Trans i18nKey="sign-up.back-button">Back to login</Trans>
+            </LinkButton>
+          </Stack>
+        </form>
       </InnerBox>
     </LoginLayout>
   );
