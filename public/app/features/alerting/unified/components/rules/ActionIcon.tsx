@@ -1,23 +1,21 @@
-import { Icon, IconName, useStyles, Tooltip } from '@grafana/ui';
-import { PopoverContent } from '@grafana/ui/src/components/Tooltip/Tooltip';
-import { TooltipPlacement } from '@grafana/ui/src/components/Tooltip/PopoverController';
-import React, { FC } from 'react';
-import { css, cx } from '@emotion/css';
-import { Link } from 'react-router-dom';
+import { ComponentProps } from 'react';
+
+import { Button, IconName, LinkButton, Tooltip } from '@grafana/ui';
+
+type TooltipProps = ComponentProps<typeof Tooltip>;
 
 interface Props {
-  tooltip: PopoverContent;
+  tooltip: TooltipProps['content'];
   icon: IconName;
-
   className?: string;
-  tooltipPlacement?: TooltipPlacement;
+  tooltipPlacement?: TooltipProps['placement'];
   to?: string;
   target?: string;
-  onClick?: (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
+  onClick?: () => void;
   'data-testid'?: string;
 }
 
-export const ActionIcon: FC<Props> = ({
+export const ActionIcon = ({
   tooltip,
   icon,
   to,
@@ -26,25 +24,35 @@ export const ActionIcon: FC<Props> = ({
   className,
   tooltipPlacement = 'top',
   ...rest
-}) => {
-  const iconEl = <Icon className={cx(useStyles(getStyle), className)} onClick={onClick} name={icon} {...rest} />;
+}: Props) => {
+  const ariaLabel = typeof tooltip === 'string' ? tooltip : undefined;
 
   return (
     <Tooltip content={tooltip} placement={tooltipPlacement}>
-      {(() => {
-        if (to) {
-          return (
-            <Link to={to} target={target}>
-              {iconEl}
-            </Link>
-          );
-        }
-        return iconEl;
-      })()}
+      {to ? (
+        <LinkButton
+          variant="secondary"
+          fill="text"
+          icon={icon}
+          href={to}
+          size="sm"
+          target={target}
+          {...rest}
+          aria-label={ariaLabel}
+        />
+      ) : (
+        <Button
+          className={className}
+          variant="secondary"
+          fill="text"
+          size="sm"
+          icon={icon}
+          type="button"
+          onClick={onClick}
+          {...rest}
+          aria-label={ariaLabel}
+        />
+      )}
     </Tooltip>
   );
 };
-
-export const getStyle = () => css`
-  cursor: pointer;
-`;

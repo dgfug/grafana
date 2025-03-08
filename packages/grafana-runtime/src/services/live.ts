@@ -1,13 +1,14 @@
+import { Observable } from 'rxjs';
+
 import {
-  DataFrame,
+  DataFrameJSON,
+  DataQueryRequest,
   DataQueryResponse,
   LiveChannelAddress,
-  LiveChannelConfig,
   LiveChannelEvent,
   LiveChannelPresenceStatus,
   StreamingFrameOptions,
 } from '@grafana/data';
-import { Observable } from 'rxjs';
 
 /**
  * @alpha -- experimental
@@ -16,15 +17,26 @@ export interface LiveDataFilter {
   fields?: string[];
 }
 
+// StreamingFrameAction and StreamingFrameOptions are now in @grafana/data
+export { StreamingFrameAction, type StreamingFrameOptions } from '@grafana/data';
+
 /**
  * @alpha
  */
 export interface LiveDataStreamOptions {
   addr: LiveChannelAddress;
-  frame?: DataFrame; // initial results
+  frame?: DataFrameJSON; // initial results
   key?: string;
-  buffer?: StreamingFrameOptions;
+  buffer?: Partial<StreamingFrameOptions>;
   filter?: LiveDataFilter;
+}
+
+/**
+ * @alpha -- experimental: send a normal query request over websockt
+ */
+export interface LiveQueryDataOptions {
+  request: DataQueryRequest;
+  body: unknown; // processed queries, same as sent to `/api/query/ds`
 }
 
 /**
@@ -37,16 +49,6 @@ export interface GrafanaLiveSrv {
   getConnectionState(): Observable<boolean>;
 
   /**
-   * Get a channel.  If the scope, namespace, or path is invalid, a shutdown
-   * channel will be returned with an error state indicated in its status.
-   *
-   * This is a singleton instance that stays active until explicitly shutdown.
-   * Multiple requests for this channel will return the same object until
-   * the channel is shutdown
-   */
-  getChannelInfo(address: LiveChannelAddress): Promise<LiveChannelConfig>;
-
-  /**
    * Watch for messages in a channel
    */
   getStream<T>(address: LiveChannelAddress): Observable<LiveChannelEvent<T>>;
@@ -55,6 +57,15 @@ export interface GrafanaLiveSrv {
    * Connect to a channel and return results as DataFrames
    */
   getDataStream(options: LiveDataStreamOptions): Observable<DataQueryResponse>;
+
+  /**
+   * Execute a query over the live websocket and potentiall subscribe to a live channel.
+   *
+   * Since the initial request and subscription are on the same socket, this will support HA setups
+   *
+   * @alpha -- this function requires the feature toggle `queryOverLive` to be set
+   */
+  getQueryData(options: LiveQueryDataOptions): Observable<DataQueryResponse>;
 
   /**
    * For channels that support presence, this will request the current state from the server.
@@ -68,7 +79,7 @@ export interface GrafanaLiveSrv {
    *
    * @alpha -- experimental
    */
-  publish(address: LiveChannelAddress, data: any): Promise<any>;
+  publish(address: LiveChannelAddress, data: unknown): Promise<unknown>;
 }
 
 let singletonInstance: GrafanaLiveSrv;

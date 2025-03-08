@@ -1,15 +1,21 @@
-import { dispatch } from 'app/store/store';
-import gfunc from '../gfunc';
 import { TemplateSrvStub } from 'test/specs/helpers';
-import { silenceConsoleOutput } from 'test/core/utils/silenceConsoleOutput';
-import { actions } from '../state/actions';
-import { getAltSegmentsSelectables, getTagsSelectables, getTagsAsSegmentsSelectables } from '../state/providers';
-import { GraphiteSegment } from '../types';
-import { createStore } from '../state/store';
 
-jest.mock('app/core/utils/promiseToDigest', () => ({
-  promiseToDigest: (scope: any) => {
-    return (p: Promise<any>) => p;
+import { dispatch } from 'app/store/store';
+
+import gfunc from '../gfunc';
+import { actions } from '../state/actions';
+import {
+  getAltSegmentsSelectables,
+  getTagsSelectables,
+  getTagsAsSegmentsSelectables,
+  getTagValuesSelectables,
+} from '../state/providers';
+import { createStore } from '../state/store';
+import { GraphiteSegment } from '../types';
+
+jest.mock('app/angular/promiseToDigest', () => ({
+  promiseToDigest: () => {
+    return (p: Promise<unknown>) => p;
   },
 }));
 
@@ -28,7 +34,7 @@ async function changeTarget(ctx: any, target: string): Promise<void> {
   await ctx.dispatch(actions.toggleEditorMode());
 }
 
-describe('Graphite actions', async () => {
+describe('Graphite actions', () => {
   const ctx = {
     datasource: {
       metricFindQuery: jest.fn(() => Promise.resolve([])),
@@ -37,6 +43,7 @@ describe('Graphite actions', async () => {
       waitForFuncDefsLoaded: jest.fn(() => Promise.resolve(null)),
       createFuncInstance: gfunc.createFuncInstance,
       getTagsAutoComplete: jest.fn().mockReturnValue(Promise.resolve([])),
+      getTagValuesAutoComplete: jest.fn().mockReturnValue(Promise.resolve([])),
     },
     target: { target: 'aliasByNode(scaleToSeconds(test.prod.*,1),2)' },
   } as any;
@@ -87,12 +94,6 @@ describe('Graphite actions', async () => {
       expect(ctx.datasource.metricFindQuery.mock.calls[lastCallIndex][0]).toBe('test.prod.*');
     });
 
-    it('should delete last segment if no metrics are found', () => {
-      expect(ctx.state.segments[0].value).toBe('test');
-      expect(ctx.state.segments[1].value).toBe('prod');
-      expect(ctx.state.segments[2].value).toBe('select metric');
-    });
-
     it('should parse expression and build function model', () => {
       expect(ctx.state.queryModel.functions.length).toBe(2);
     });
@@ -107,12 +108,6 @@ describe('Graphite actions', async () => {
     it('should validate metric key exists', () => {
       const lastCallIndex = ctx.datasource.metricFindQuery.mock.calls.length - 1;
       expect(ctx.datasource.metricFindQuery.mock.calls[lastCallIndex][0]).toBe('test.test.*');
-    });
-
-    it('should delete last segment if no metrics are found', () => {
-      expect(ctx.state.segments[0].value).toBe('test');
-      expect(ctx.state.segments[1].value).toBe('test');
-      expect(ctx.state.segments[2].value).toBe('select metric');
     });
 
     it('should parse expression and build function model', () => {
@@ -159,7 +154,7 @@ describe('Graphite actions', async () => {
     });
 
     it('should add 2 segments', () => {
-      expect(ctx.state.segments.length).toBe(2);
+      expect(ctx.state.segments.length).toBe(3);
     });
 
     it('should add function param', () => {
@@ -190,7 +185,7 @@ describe('Graphite actions', async () => {
     });
 
     it('should add segments', () => {
-      expect(ctx.state.segments.length).toBe(3);
+      expect(ctx.state.segments.length).toBe(4);
     });
 
     it('should have correct func params', () => {
@@ -210,8 +205,32 @@ describe('Graphite actions', async () => {
     });
   });
 
+  it('current time range and limit is passed when getting list of tags when editing', async () => {
+    const currentRange = { from: 0, to: 1 };
+    ctx.state.range = currentRange;
+    await getTagsSelectables(ctx.state, 0, 'any');
+    expect(ctx.state.datasource.getTagsAutoComplete).toHaveBeenCalledWith([], 'any', {
+      range: currentRange,
+      limit: 5000,
+    });
+  });
+
+  it('current time range and limit is passed when getting list of tags for adding', async () => {
+    const currentRange = { from: 0, to: 1 };
+    ctx.state.range = currentRange;
+    await getTagsAsSegmentsSelectables(ctx.state, 'any');
+    expect(ctx.state.datasource.getTagsAutoComplete).toHaveBeenCalledWith([], 'any', {
+      range: currentRange,
+      limit: 5000,
+    });
+  });
+
+  it('limit is passed when getting list of tag values', async () => {
+    await getTagValuesSelectables(ctx.state, { key: 'key', operator: '=', value: 'value' }, 1, 'test');
+    expect(ctx.state.datasource.getTagValuesAutoComplete).toHaveBeenCalledWith([], 'key', 'test', { limit: 5000 });
+  });
+
   describe('when autocomplete for metric names is not available', () => {
-    silenceConsoleOutput();
     beforeEach(() => {
       ctx.state.datasource.getTagsAutoComplete = jest.fn().mockReturnValue(Promise.resolve([]));
       ctx.state.datasource.metricFindQuery = jest.fn().mockReturnValue(
@@ -224,7 +243,7 @@ describe('Graphite actions', async () => {
     it('getAltSegmentsSelectables should handle autocomplete errors', async () => {
       await expect(async () => {
         await getAltSegmentsSelectables(ctx.state, 0, 'any');
-        expect(mockDispatch).toBeCalledWith(
+        expect(mockDispatch).toHaveBeenCalledWith(
           expect.objectContaining({
             type: 'appNotifications/notifyApp',
           })
@@ -242,7 +261,6 @@ describe('Graphite actions', async () => {
   });
 
   describe('when autocomplete for tags is not available', () => {
-    silenceConsoleOutput();
     beforeEach(() => {
       ctx.datasource.metricFindQuery = jest.fn().mockReturnValue(Promise.resolve([]));
       ctx.datasource.getTagsAutoComplete = jest.fn().mockReturnValue(
@@ -255,7 +273,7 @@ describe('Graphite actions', async () => {
     it('getTagsSelectables should handle autocomplete errors', async () => {
       await expect(async () => {
         await getTagsSelectables(ctx.state, 0, 'any');
-        expect(mockDispatch).toBeCalledWith(
+        expect(mockDispatch).toHaveBeenCalledWith(
           expect.objectContaining({
             type: 'appNotifications/notifyApp',
           })
@@ -274,7 +292,7 @@ describe('Graphite actions', async () => {
     it('getTagsAsSegmentsSelectables should handle autocomplete errors', async () => {
       await expect(async () => {
         await getTagsAsSegmentsSelectables(ctx.state, 'any');
-        expect(mockDispatch).toBeCalledWith(
+        expect(mockDispatch).toHaveBeenCalledWith(
           expect.objectContaining({
             type: 'appNotifications/notifyApp',
           })
@@ -456,6 +474,48 @@ describe('Graphite actions', async () => {
     it('should update target', () => {
       const expected = "seriesByTag('tag2!=~value2')";
       expect(ctx.state.target.target).toEqual(expected);
+    });
+  });
+
+  describe('when auto-completing over a large set of tags and metrics', () => {
+    const manyMetrics: Array<{ text: string }> = [],
+      max = 20000;
+
+    beforeEach(() => {
+      for (let i = 0; i < max; i++) {
+        manyMetrics.push({ text: `metric${i}` });
+      }
+      ctx.state.datasource.metricFindQuery = jest.fn().mockReturnValue(Promise.resolve(manyMetrics));
+      ctx.state.datasource.getTagsAutoComplete = jest.fn((_tag, _prefix, { limit }) => {
+        const tags = [];
+        for (let i = 0; i < limit; i++) {
+          tags.push({ text: `tag${i}` });
+        }
+        return tags;
+      });
+    });
+
+    it('uses limited metrics and tags list', async () => {
+      ctx.state.supportsTags = true;
+      const segments = await getAltSegmentsSelectables(ctx.state, 0, '');
+      expect(segments).toHaveLength(10000);
+      expect(segments[0].value!.value).toBe('*'); // * - is a fixed metric name, always added at the top
+      expect(segments[4999].value!.value).toBe('metric4998');
+      expect(segments[5000].value!.value).toBe('tag: tag0');
+      expect(segments[9999].value!.value).toBe('tag: tag4999');
+    });
+
+    it('uses correct limit for metrics and tags list when tags are not supported', async () => {
+      ctx.state.supportsTags = false;
+      const segments = await getAltSegmentsSelectables(ctx.state, 0, '');
+      expect(segments).toHaveLength(5000);
+      expect(segments[0].value!.value).toBe('*'); // * - is a fixed metric name, always added at the top
+      expect(segments[4999].value!.value).toBe('metric4998');
+    });
+
+    it('uses limited metrics when adding more metrics', async () => {
+      const segments = await getAltSegmentsSelectables(ctx.state, 1, '');
+      expect(segments).toHaveLength(5000);
     });
   });
 });
