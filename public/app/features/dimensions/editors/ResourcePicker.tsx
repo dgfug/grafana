@@ -1,171 +1,157 @@
-import React, { useEffect, useState, ChangeEvent } from 'react';
-import {
-  TabContent,
-  Button,
-  Select,
-  Input,
-  Spinner,
-  TabsBar,
-  Tab,
-  StringValueEditor,
-  useTheme2,
-  stylesFactory,
-} from '@grafana/ui';
-import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { ResourceCards } from './ResourceCards';
-import SVG from 'react-inlinesvg';
 import { css } from '@emotion/css';
+import { useRef } from 'react';
+import * as React from 'react';
+
+import { GrafanaTheme2 } from '@grafana/data';
+import {
+  Button,
+  InlineField,
+  InlineFieldRow,
+  Input,
+  LinkButton,
+  Popover,
+  PopoverController,
+  useStyles2,
+  useTheme2,
+} from '@grafana/ui';
+import { closePopover } from '@grafana/ui/src/utils/closePopover';
+import { SanitizedSVG } from 'app/core/components/SVG/SanitizedSVG';
+
 import { getPublicOrAbsoluteUrl } from '../resource';
-import { getDatasourceSrv } from 'app/features/plugins/datasource_srv';
-import { FileElement, GrafanaDatasource } from 'app/plugins/datasource/grafana/datasource';
+import { MediaType, ResourceFolderName, ResourcePickerSize } from '../types';
+
+import { ResourcePickerPopover } from './ResourcePickerPopover';
 
 interface Props {
-  value?: string; //img/icons/unicons/0-plus.svg
   onChange: (value?: string) => void;
-  mediaType: 'icon' | 'image';
+  mediaType: MediaType;
+  folderName: ResourceFolderName;
+  size: ResourcePickerSize;
+  onClear?: (event: React.MouseEvent) => void;
+  value?: string; //img/icons/unicons/0-plus.svg
+  src?: string;
+  name?: string;
+  placeholder?: string;
+  color?: string;
+  maxFiles?: number;
 }
 
-interface ResourceItem {
-  label: string;
-  value: string;
-  search: string;
-  imgUrl: string;
-}
+export const ResourcePicker = (props: Props) => {
+  const { value, src, name, placeholder, onChange, onClear, mediaType, folderName, size, color, maxFiles } = props;
 
-export function ResourcePicker(props: Props) {
-  const { value, onChange, mediaType } = props;
-  const folders = (mediaType === 'icon' ? ['img/icons/unicons', 'img/icons/iot'] : ['img/bg']).map((v) => ({
-    label: v,
-    value: v,
-  }));
-  const folderOfCurrentValue = value ? folders.filter((folder) => value.indexOf(folder.value) > -1)[0] : folders[0];
-  const [currentFolder, setCurrentFolder] = useState<SelectableValue<string>>(folderOfCurrentValue);
-  const [tabs, setTabs] = useState([
-    { label: 'Select', active: true },
-    // { label: 'Upload', active: false },
-  ]);
-  const [directoryIndex, setDirectoryIndex] = useState<ResourceItem[]>([]);
-  const [filteredIndex, setFilteredIndex] = useState<ResourceItem[]>([]);
+  const styles = useStyles2(getStyles);
   const theme = useTheme2();
-  const styles = getStyles(theme);
 
-  useEffect(() => {
-    // we don't want to load everything before picking a folder
-    const folder = currentFolder?.value;
-    if (folder) {
-      const filter =
-        mediaType === 'icon'
-          ? (item: FileElement) => item.name.endsWith('.svg')
-          : (item: FileElement) => item.name.endsWith('.png') || item.name.endsWith('.gif');
+  const pickerTriggerRef = useRef<HTMLDivElement>(null);
+  const popoverElement = (props: { hidePopper?: () => void }) => {
+    return (
+      <ResourcePickerPopover
+        onChange={onChange}
+        value={value}
+        mediaType={mediaType}
+        folderName={folderName}
+        maxFiles={maxFiles}
+        hidePopper={props.hidePopper}
+      />
+    );
+  };
 
-      getDatasourceSrv()
-        .get('-- Grafana --')
-        .then((ds) => {
-          (ds as GrafanaDatasource).listFiles(folder).subscribe({
-            next: (frame) => {
-              const cards: ResourceItem[] = [];
-              frame.forEach((item) => {
-                if (filter(item)) {
-                  const idx = item.name.lastIndexOf('.');
-                  cards.push({
-                    value: item.name,
-                    label: item.name,
-                    search: (idx ? item.name.substr(0, idx) : item.name).toLowerCase(),
-                    imgUrl: `public/${folder}/${item.name}`,
-                  });
-                }
-              });
-              setDirectoryIndex(cards);
-              setFilteredIndex(cards);
-            },
-          });
-        });
-    }
-  }, [mediaType, currentFolder]);
+  let sanitizedSrc = src;
+  if (!sanitizedSrc && value) {
+    sanitizedSrc = getPublicOrAbsoluteUrl(value);
+  }
 
-  const onChangeSearch = (e: ChangeEvent<HTMLInputElement>) => {
-    let query = e.currentTarget.value;
-    if (query) {
-      query = query.toLowerCase();
-      setFilteredIndex(directoryIndex.filter((card) => card.search.includes(query)));
+  const colorStyle = color && {
+    fill: theme.visualization.getColorByName(color),
+  };
+
+  const renderSmallResourcePicker = () => {
+    if (value && sanitizedSrc) {
+      return <SanitizedSVG src={sanitizedSrc} className={styles.icon} style={{ ...colorStyle }} />;
     } else {
-      setFilteredIndex(directoryIndex);
+      return (
+        <LinkButton variant="primary" fill="text" size="sm">
+          Set icon
+        </LinkButton>
+      );
     }
   };
-  const imgSrc = getPublicOrAbsoluteUrl(value!);
+
+  const renderNormalResourcePicker = () => (
+    <InlineFieldRow>
+      <InlineField label={null} grow>
+        <Input
+          value={getDisplayName(src, name)}
+          placeholder={placeholder}
+          readOnly={true}
+          prefix={sanitizedSrc && <SanitizedSVG src={sanitizedSrc} className={styles.icon} style={{ ...colorStyle }} />}
+          suffix={<Button icon="times" variant="secondary" fill="text" size="sm" onClick={onClear} />}
+        />
+      </InlineField>
+    </InlineFieldRow>
+  );
 
   return (
-    <div>
-      <div className={styles.currentItem}>
-        {value && (
+    <PopoverController content={popoverElement}>
+      {(showPopper, hidePopper, popperProps) => {
+        return (
           <>
-            {mediaType === 'icon' && <SVG src={imgSrc} className={styles.img} />}
-            {mediaType === 'image' && <img src={imgSrc} className={styles.img} />}
-          </>
-        )}
-        <StringValueEditor value={value ?? ''} onChange={onChange} item={{} as any} context={{} as any} />
-        <Button variant="secondary" onClick={() => onChange(value)}>
-          Apply
-        </Button>
-      </div>
-      <TabsBar>
-        {tabs.map((tab, index) => (
-          <Tab
-            label={tab.label}
-            key={index}
-            active={tab.active}
-            onChangeTab={() => setTabs(tabs.map((tab, idx) => ({ ...tab, active: idx === index })))}
-          />
-        ))}
-      </TabsBar>
-      <TabContent>
-        {tabs[0].active && (
-          <div className={styles.tabContent}>
-            <Select options={folders} onChange={setCurrentFolder} value={currentFolder} />
-            <Input placeholder="Search" onChange={onChangeSearch} />
-            {filteredIndex ? (
-              <div className={styles.cardsWrapper}>
-                <ResourceCards cards={filteredIndex} onChange={onChange} currentFolder={currentFolder} />
-              </div>
-            ) : (
-              <Spinner />
+            {pickerTriggerRef.current && (
+              <Popover
+                {...popperProps}
+                referenceElement={pickerTriggerRef.current}
+                onMouseEnter={showPopper}
+                onKeyDown={(event) => {
+                  closePopover(event, hidePopper);
+                }}
+                hidePopper={hidePopper}
+              />
             )}
-          </div>
-        )}
-        {/* TODO: add file upload
-          {tabs[1].active && (
-          <FileUpload
-            onFileUpload={({ currentTarget }) => console.log('file', currentTarget?.files && currentTarget.files[0])}
-            className={styles.tabContent}
-          />
-        )} */}
-      </TabContent>
-    </div>
+
+            <div
+              ref={pickerTriggerRef}
+              className={styles.pointer}
+              onClick={showPopper}
+              onKeyDown={(e: React.KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                  showPopper();
+                }
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              {size === ResourcePickerSize.SMALL && renderSmallResourcePicker()}
+              {size === ResourcePickerSize.NORMAL && renderNormalResourcePicker()}
+            </div>
+          </>
+        );
+      }}
+    </PopoverController>
   );
+};
+
+// strip the SVG off icons in the icons folder
+function getDisplayName(src?: string, name?: string): string | undefined {
+  if (src?.startsWith('public/img/icons')) {
+    const idx = name?.lastIndexOf('.svg') ?? 0;
+    if (idx > 0) {
+      return name!.substring(0, idx);
+    }
+  }
+  return name;
 }
 
-const getStyles = stylesFactory((theme: GrafanaTheme2) => {
-  return {
-    cardsWrapper: css`
-      height: calc(100vh - 480px);
-    `,
-    tabContent: css`
-      margin-top: 20px;
-      & > :nth-child(2) {
-        margin-top: 10px;
-      },
-    `,
-    currentItem: css`
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      column-gap: 2px;
-      margin: -18px 0px 18px 0px;
-    `,
-    img: css`
-      width: 40px;
-      height: 40px;
-      fill: ${theme.colors.text.primary};
-    `,
-  };
+const getStyles = (theme: GrafanaTheme2) => ({
+  pointer: css({
+    cursor: 'pointer',
+    'input[readonly]': {
+      cursor: 'pointer',
+    },
+  }),
+  icon: css({
+    verticalAlign: 'middle',
+    display: 'inline-block',
+    fill: 'currentColor',
+    width: '25px',
+  }),
 });

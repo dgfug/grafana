@@ -1,78 +1,152 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { css, cx } from '@emotion/css';
+import { noop } from 'lodash';
 import pluralize from 'pluralize';
-import { Icon, useStyles2 } from '@grafana/ui';
-import { Alert, PromRuleWithLocation } from 'app/types/unified-alerting';
-import { AlertLabels } from 'app/features/alerting/unified/components/AlertLabels';
-import { AlertStateTag } from 'app/features/alerting/unified/components/rules/AlertStateTag';
-import { dateTime, GrafanaTheme2 } from '@grafana/data';
-import { css } from '@emotion/css';
-import { PromAlertingRuleState } from 'app/types/unified-alerting-dto';
-import { omit } from 'lodash';
-import { alertInstanceKey } from 'app/features/alerting/unified/utils/rules';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { GrafanaTheme2, PanelProps } from '@grafana/data';
+import { Button, clearButtonStyles, Icon, useStyles2 } from '@grafana/ui';
+import { AlertInstancesTable } from 'app/features/alerting/unified/components/rules/AlertInstancesTable';
+import { INSTANCES_DISPLAY_LIMIT } from 'app/features/alerting/unified/components/rules/RuleDetails';
+import { sortAlerts } from 'app/features/alerting/unified/utils/misc';
+import { Alert, CombinedRule } from 'app/types/unified-alerting';
+
+import { DEFAULT_PER_PAGE_PAGINATION } from '../../../core/constants';
+
+import { GroupMode, UnifiedAlertListOptions } from './types';
+import { filterAlerts } from './util';
 
 interface Props {
-  ruleWithLocation: PromRuleWithLocation;
-  showInstances: boolean;
+  rule?: CombinedRule;
+  alerts: Alert[];
+  options: PanelProps<UnifiedAlertListOptions>['options'];
+  grafanaTotalInstances?: number;
+  grafanaFilteredInstancesTotal?: number;
+  handleInstancesLimit?: (limit: boolean) => void;
+  limitInstances?: boolean;
 }
 
-export const AlertInstances = ({ ruleWithLocation, showInstances }: Props) => {
-  const { rule } = ruleWithLocation;
-  const [displayInstances, setDisplayInstances] = useState<boolean>(showInstances);
+export const AlertInstances = ({
+  rule,
+  alerts,
+  options,
+  grafanaTotalInstances,
+  handleInstancesLimit,
+  limitInstances,
+  grafanaFilteredInstancesTotal,
+}: Props) => {
+  // when custom grouping is enabled, we will always uncollapse the list of alert instances
+  const defaultShowInstances = options.groupMode === GroupMode.Custom ? true : options.showInstances;
+  const [displayInstances, setDisplayInstances] = useState<boolean>(defaultShowInstances);
   const styles = useStyles2(getStyles);
+  const clearButton = useStyles2(clearButtonStyles);
+
+  const toggleDisplayInstances = useCallback(() => {
+    setDisplayInstances((display) => !display);
+  }, []);
+
+  // TODO Filtering instances here has some implications
+  // If a rule has 0 instances after filtering there is no way not to show that rule
+  const filteredAlerts = useMemo(
+    (): Alert[] => filterAlerts(options, sortAlerts(options.sortOrder, alerts)) ?? [],
+    [alerts, options]
+  );
+  const isGrafanaAlert = grafanaTotalInstances !== undefined;
+
+  const hiddenInstancesForGrafanaAlerts =
+    grafanaTotalInstances && grafanaFilteredInstancesTotal ? grafanaTotalInstances - grafanaFilteredInstancesTotal : 0;
+  const hiddenInstancesForNonGrafanaAlerts = alerts.length - filteredAlerts.length;
+
+  const hiddenInstances = isGrafanaAlert ? hiddenInstancesForGrafanaAlerts : hiddenInstancesForNonGrafanaAlerts;
+
+  const uncollapsible = filteredAlerts.length > 0;
+  const toggleShowInstances = uncollapsible ? toggleDisplayInstances : noop;
 
   useEffect(() => {
-    setDisplayInstances(showInstances);
-  }, [showInstances]);
+    if (filteredAlerts.length === 0) {
+      setDisplayInstances(false);
+    }
+  }, [filteredAlerts]);
 
-  // sort instances, because API returns them in random order every time
-  const sortedAlerts = useMemo(
-    (): Alert[] =>
-      displayInstances
-        ? rule.alerts.slice().sort((a, b) => alertInstanceKey(a).localeCompare(alertInstanceKey(b)))
-        : [],
-    [rule, displayInstances]
-  );
+  const onShowAllClick = async () => {
+    if (!handleInstancesLimit) {
+      return;
+    }
+    handleInstancesLimit(false);
+    setDisplayInstances(true);
+  };
+
+  const onShowLimitedClick = async () => {
+    if (!handleInstancesLimit) {
+      return;
+    }
+    handleInstancesLimit(true);
+    setDisplayInstances(true);
+  };
+  const totalInstancesGrafana = limitInstances ? grafanaFilteredInstancesTotal : filteredAlerts.length;
+  const totalInstancesNotGrafana = filteredAlerts.length;
+  const totalInstancesNumber = isGrafanaAlert ? totalInstancesGrafana : totalInstancesNotGrafana;
+
+  const limitStatus = limitInstances
+    ? `Showing ${INSTANCES_DISPLAY_LIMIT} of ${grafanaTotalInstances} instances`
+    : `Showing all ${grafanaTotalInstances} instances`;
+
+  const limitButtonLabel = limitInstances
+    ? 'View all instances'
+    : `Limit the result to ${INSTANCES_DISPLAY_LIMIT} instances`;
+
+  const instancesLimitedAndOverflowed =
+    grafanaTotalInstances &&
+    INSTANCES_DISPLAY_LIMIT === filteredAlerts.length &&
+    grafanaTotalInstances > filteredAlerts.length;
+  const instancesNotLimitedAndoverflowed =
+    grafanaTotalInstances && INSTANCES_DISPLAY_LIMIT < filteredAlerts.length && !limitInstances;
+
+  const footerRow =
+    instancesLimitedAndOverflowed || instancesNotLimitedAndoverflowed ? (
+      <div className={styles.footerRow}>
+        <div>{limitStatus}</div>
+        {
+          <Button size="sm" variant="secondary" onClick={limitInstances ? onShowAllClick : onShowLimitedClick}>
+            {limitButtonLabel}
+          </Button>
+        }
+      </div>
+    ) : undefined;
 
   return (
     <div>
-      {rule.state !== PromAlertingRuleState.Inactive && (
-        <div className={styles.instance} onClick={() => setDisplayInstances(!displayInstances)}>
-          <Icon name={displayInstances ? 'angle-down' : 'angle-right'} size={'md'} />
-          <span>{`${rule.alerts.length} ${pluralize('instance', rule.alerts.length)}`}</span>
-        </div>
+      {options.groupMode === GroupMode.Default && (
+        <button
+          className={cx(clearButton, uncollapsible ? styles.clickable : '')}
+          onClick={() => toggleShowInstances()}
+        >
+          {uncollapsible && <Icon name={displayInstances ? 'angle-down' : 'angle-right'} size={'md'} />}
+          <span>{`${totalInstancesNumber} ${pluralize('instance', totalInstancesNumber)}`}</span>
+          {hiddenInstances > 0 && <span>, {`${hiddenInstances} hidden by filters`}</span>}
+        </button>
       )}
-
-      {!!sortedAlerts.length && (
-        <ol className={styles.list}>
-          {sortedAlerts.map((alert, index) => {
-            return (
-              <li className={styles.listItem} key={`${alert.activeAt}-${index}`}>
-                <div>
-                  <AlertStateTag state={alert.state} />
-                  <span className={styles.date}>{dateTime(alert.activeAt).format('YYYY-MM-DD HH:mm:ss')}</span>
-                </div>
-                <AlertLabels labels={omit(alert.labels, 'alertname')} />
-              </li>
-            );
-          })}
-        </ol>
+      {displayInstances && (
+        <AlertInstancesTable
+          rule={rule}
+          instances={filteredAlerts}
+          pagination={{ itemsPerPage: 2 * DEFAULT_PER_PAGE_PAGINATION }}
+          footerRow={footerRow}
+        />
       )}
     </div>
   );
 };
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  instance: css`
-    cursor: pointer;
-  `,
-  list: css`
-    list-style-type: none;
-  `,
-  listItem: css`
-    margin-top: ${theme.spacing(1)};
-  `,
-  date: css`
-    font-size: ${theme.typography.bodySmall.fontSize};
-    padding-left: ${theme.spacing(0.5)};
-  `,
+  clickable: css({
+    cursor: 'pointer',
+  }),
+  footerRow: css({
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(1),
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  }),
 });
