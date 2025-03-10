@@ -1,6 +1,9 @@
 import { useAsync } from 'react-use';
+
+import { config } from '@grafana/runtime';
+
+import { loadPlugin } from '../../utils';
 import { CatalogPlugin } from '../types';
-import { loadPlugin } from '../../PluginPage';
 
 export const usePluginConfig = (plugin?: CatalogPlugin) => {
   return useAsync(async () => {
@@ -8,7 +11,9 @@ export const usePluginConfig = (plugin?: CatalogPlugin) => {
       return null;
     }
 
-    if (plugin.isInstalled && !plugin.isDisabled) {
+    const isPluginInstalled = config.pluginAdminExternalManageEnabled ? plugin.isFullyInstalled : plugin.isInstalled;
+
+    if (isPluginInstalled && !plugin.isDisabled) {
       return loadPlugin(plugin.id);
     }
     return null;

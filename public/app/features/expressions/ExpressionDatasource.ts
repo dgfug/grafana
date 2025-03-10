@@ -1,46 +1,77 @@
-import { DataSourceInstanceSettings, DataSourcePluginMeta, PluginType } from '@grafana/data';
-import { ExpressionQuery, ExpressionQueryType } from './types';
+import { from, mergeMap, Observable } from 'rxjs';
+
+import {
+  DataQueryRequest,
+  DataQueryResponse,
+  DataSourceInstanceSettings,
+  DataSourcePluginMeta,
+  PluginType,
+  ScopedVars,
+} from '@grafana/data';
+import { DataSourceWithBackend, getDataSourceSrv, getTemplateSrv } from '@grafana/runtime';
+import { ExpressionDatasourceRef } from '@grafana/runtime/src/utils/DataSourceWithBackend';
+
 import { ExpressionQueryEditor } from './ExpressionQueryEditor';
-import { DataSourceWithBackend } from '@grafana/runtime';
+import { ExpressionDatasourceUID, ExpressionQuery, ExpressionQueryType } from './types';
 
 /**
  * This is a singleton instance that just pretends to be a DataSource
  */
 export class ExpressionDatasourceApi extends DataSourceWithBackend<ExpressionQuery> {
-  constructor(instanceSettings: DataSourceInstanceSettings) {
+  constructor(public instanceSettings: DataSourceInstanceSettings) {
     super(instanceSettings);
+  }
+
+  applyTemplateVariables(query: ExpressionQuery, scopedVars: ScopedVars) {
+    const templateSrv = getTemplateSrv();
+    return {
+      ...query,
+      expression: templateSrv.replace(query.expression, scopedVars),
+      window: templateSrv.replace(query.window, scopedVars),
+    };
   }
 
   getCollapsedText(query: ExpressionQuery) {
     return `Expression: ${query.type}`;
   }
 
+  query(request: DataQueryRequest<ExpressionQuery>): Observable<DataQueryResponse> {
+    let targets = request.targets.map(async (query: ExpressionQuery): Promise<ExpressionQuery> => {
+      const ds = await getDataSourceSrv().get(query.datasource);
+
+      if (!ds.interpolateVariablesInQueries) {
+        return query;
+      }
+
+      return ds?.interpolateVariablesInQueries([query], request.scopedVars, request.filters)[0] as ExpressionQuery;
+    });
+
+    let sub = from(Promise.all(targets));
+    return sub.pipe(mergeMap((t) => super.query({ ...request, targets: t })));
+  }
+
   newQuery(query?: Partial<ExpressionQuery>): ExpressionQuery {
     return {
       refId: '--', // Replaced with query
+      datasource: ExpressionDatasourceRef,
       type: query?.type ?? ExpressionQueryType.math,
-      datasource: ExpressionDatasourceID,
-      conditions: query?.conditions ?? undefined,
+      ...query,
     };
   }
 }
 
-// MATCHES the constant in DataSourceWithBackend
-export const ExpressionDatasourceID = '__expr__';
-export const ExpressionDatasourceUID = '-100';
-
 export const instanceSettings: DataSourceInstanceSettings = {
   id: -100,
   uid: ExpressionDatasourceUID,
-  name: ExpressionDatasourceID,
-  type: 'grafana-expression',
+  name: ExpressionDatasourceRef.name,
+  type: ExpressionDatasourceRef.type,
   access: 'proxy',
   meta: {
     baseUrl: '',
     module: '',
     type: PluginType.datasource,
-    name: ExpressionDatasourceID,
-    id: ExpressionDatasourceID,
+    name: ExpressionDatasourceRef.type,
+    id: ExpressionDatasourceRef.type,
     info: {
       author: {
         name: 'Grafana Labs',
@@ -57,11 +88,12 @@ export const instanceSettings: DataSourceInstanceSettings = {
     },
   },
   jsonData: {},
+  readOnly: true,
 };
 
 export const dataSource = new ExpressionDatasourceApi(instanceSettings);
 dataSource.meta = {
-  id: ExpressionDatasourceID,
+  id: ExpressionDatasourceRef.type,
   info: {
     logos: {
       small: 'public/img/icn-datasource.svg',

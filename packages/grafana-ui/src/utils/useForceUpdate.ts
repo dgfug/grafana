@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 /** @internal */
 export function useForceUpdate() {
-  const [value, setValue] = useState(0); // integer state
-  return () => setValue(value + 1); // update the state to force render
+  const [_, setValue] = useState(0); // integer state
+  return useCallback(() => setValue((prevState) => prevState + 1), []);
 }

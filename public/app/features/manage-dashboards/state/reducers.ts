@@ -1,5 +1,7 @@
 import { createSlice, Draft, PayloadAction } from '@reduxjs/toolkit';
-import { DataSourceInstanceSettings } from '@grafana/data';
+
+import { DataSourceInstanceSettings, LoadingState } from '@grafana/data';
+
 import { LibraryElementDTO } from '../../library-panels/types';
 
 export enum DashboardSource {
@@ -14,7 +16,7 @@ export interface ImportDashboardDTO {
   constants: string[];
   dataSources: DataSourceInstanceSettings[];
   elements: LibraryElementDTO[];
-  folder: { id: number; title?: string };
+  folder: { uid: string; title?: string };
 }
 
 export enum InputType {
@@ -25,13 +27,14 @@ export enum InputType {
 
 export enum LibraryPanelInputState {
   New = 'new',
-  Exits = 'exists',
+  Exists = 'exists',
   Different = 'different',
 }
 
 export interface DashboardInput {
   name: string;
   label: string;
+  description?: string;
   info: string;
   value: string;
   type: InputType;
@@ -57,7 +60,7 @@ export interface ImportDashboardState {
   dashboard: any;
   source: DashboardSource;
   inputs: DashboardInputs;
-  isLoaded: boolean;
+  state: LoadingState;
 }
 
 export const initialImportDashboardState: ImportDashboardState = {
@@ -65,7 +68,7 @@ export const initialImportDashboardState: ImportDashboardState = {
   dashboard: {},
   source: DashboardSource.Json,
   inputs: {} as DashboardInputs,
-  isLoaded: false,
+  state: LoadingState.NotStarted,
 };
 
 const importDashboardSlice = createSlice({
@@ -79,7 +82,7 @@ const importDashboardSlice = createSlice({
       };
       state.meta = { updatedAt: action.payload.updatedAt, orgName: action.payload.orgName };
       state.source = DashboardSource.Gcom;
-      state.isLoaded = true;
+      state.state = LoadingState.Done;
     },
     setJsonDashboard: (state: Draft<ImportDashboardState>, action: PayloadAction<any>) => {
       state.dashboard = {
@@ -88,21 +91,28 @@ const importDashboardSlice = createSlice({
       };
       state.meta = initialImportDashboardState.meta;
       state.source = DashboardSource.Json;
-      state.isLoaded = true;
+      state.state = LoadingState.Done;
     },
     clearDashboard: (state: Draft<ImportDashboardState>) => {
       state.dashboard = {};
-      state.isLoaded = false;
+      state.state = LoadingState.NotStarted;
     },
     setInputs: (state: Draft<ImportDashboardState>, action: PayloadAction<any[]>) => {
       state.inputs = {
         dataSources: action.payload.filter((p) => p.type === InputType.DataSource),
         constants: action.payload.filter((p) => p.type === InputType.Constant),
-        libraryPanels: [],
+        libraryPanels: state.inputs.libraryPanels || [],
       };
     },
     setLibraryPanelInputs: (state: Draft<ImportDashboardState>, action: PayloadAction<LibraryPanelInput[]>) => {
       state.inputs.libraryPanels = action.payload;
+    },
+    fetchFailed: (state: Draft<ImportDashboardState>) => {
+      state.dashboard = {};
+      state.state = LoadingState.Error;
+    },
+    fetchDashboard: (state: Draft<ImportDashboardState>) => {
+      state.state = LoadingState.Loading;
     },
   },
 });
@@ -113,6 +123,8 @@ export const {
   setGcomDashboard,
   setJsonDashboard,
   setLibraryPanelInputs,
+  fetchFailed,
+  fetchDashboard,
 } = importDashboardSlice.actions;
 
 export const importDashboardReducer = importDashboardSlice.reducer;

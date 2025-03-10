@@ -1,23 +1,36 @@
-import React, { PureComponent } from 'react';
+import { PureComponent } from 'react';
 import { connect, ConnectedProps } from 'react-redux';
-import { Alert, InlineFieldRow, VerticalGroup } from '@grafana/ui';
-import { SelectableValue } from '@grafana/data';
 
-import { AdHocVariableModel } from '../types';
-import { VariableEditorProps } from '../editor/types';
-import { VariableEditorState } from '../editor/reducer';
-import { AdHocVariableEditorState } from './reducer';
-import { changeVariableDatasource, initAdHocVariableEditor } from './actions';
+import { AdHocVariableModel, DataSourceInstanceSettings, getDataSourceRef } from '@grafana/data';
+import { AdHocVariableForm } from 'app/features/dashboard-scene/settings/variables/components/AdHocVariableForm';
 import { StoreState } from 'app/types';
-import { VariableSectionHeader } from '../editor/VariableSectionHeader';
-import { VariableSelectField } from '../editor/VariableSelectField';
 
-const mapStateToProps = (state: StoreState) => ({
-  editor: state.templating.editor as VariableEditorState<AdHocVariableEditorState>,
-});
+import { initialVariableEditorState } from '../editor/reducer';
+import { getAdhocVariableEditorState } from '../editor/selectors';
+import { VariableEditorProps } from '../editor/types';
+import { getVariablesState } from '../state/selectors';
+import { toKeyedVariableIdentifier } from '../utils';
+
+import { changeVariableDatasource } from './actions';
+
+const mapStateToProps = (state: StoreState, ownProps: OwnProps) => {
+  const { rootStateKey } = ownProps.variable;
+
+  if (!rootStateKey) {
+    console.error('AdHocVariableEditor: variable has no rootStateKey');
+    return {
+      extended: getAdhocVariableEditorState(initialVariableEditorState),
+    };
+  }
+
+  const { editor } = getVariablesState(rootStateKey, state);
+
+  return {
+    extended: getAdhocVariableEditorState(editor),
+  };
+};
 
 const mapDispatchToProps = {
-  initAdHocVariableEditor,
   changeVariableDatasource,
 };
 
@@ -29,36 +42,26 @@ type Props = OwnProps & ConnectedProps<typeof connector>;
 
 export class AdHocVariableEditorUnConnected extends PureComponent<Props> {
   componentDidMount() {
-    this.props.initAdHocVariableEditor();
+    const { rootStateKey } = this.props.variable;
+    if (!rootStateKey) {
+      console.error('AdHocVariableEditor: variable has no rootStateKey');
+      return;
+    }
   }
 
-  onDatasourceChanged = (option: SelectableValue<string>) => {
-    this.props.changeVariableDatasource(option.value);
+  onDatasourceChanged = (ds: DataSourceInstanceSettings) => {
+    this.props.changeVariableDatasource(toKeyedVariableIdentifier(this.props.variable), getDataSourceRef(ds));
   };
 
   render() {
-    const { variable, editor } = this.props;
-    const dataSources = editor.extended?.dataSources ?? [];
-    const infoText = editor.extended?.infoText ?? null;
-    const options = dataSources.map((ds) => ({ label: ds.text, value: ds.value }));
-    const value = options.find((o) => o.value === variable.datasource) ?? options[0];
+    const { variable, extended } = this.props;
 
     return (
-      <VerticalGroup spacing="xs">
-        <VariableSectionHeader name="Options" />
-        <VerticalGroup spacing="sm">
-          <InlineFieldRow>
-            <VariableSelectField
-              name="Data source"
-              value={value}
-              options={options}
-              onChange={this.onDatasourceChanged}
-              labelWidth={10}
-            />
-          </InlineFieldRow>
-          {infoText ? <Alert title={infoText} severity="info" /> : null}
-        </VerticalGroup>
-      </VerticalGroup>
+      <AdHocVariableForm
+        datasource={variable.datasource ?? undefined}
+        onDataSourceChange={this.onDatasourceChanged}
+        infoText={extended?.infoText}
+      />
     );
   }
 }
