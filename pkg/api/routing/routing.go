@@ -1,27 +1,23 @@
 package routing
 
 import (
+	"net/http"
+
 	"github.com/grafana/grafana/pkg/api/response"
-	"github.com/grafana/grafana/pkg/models"
-	"gopkg.in/macaron.v1"
+	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
+	"github.com/grafana/grafana/pkg/web"
 )
 
 var (
 	ServerError = func(err error) response.Response {
-		return response.Error(500, "Server error", err)
+		return response.Error(http.StatusInternalServerError, "Server error", err)
 	}
 )
 
-func Wrap(action interface{}) macaron.Handler {
-	return func(c *models.ReqContext) {
-		var res response.Response
-		val, err := c.Invoke(action)
-		if err == nil && val != nil && len(val) > 0 {
-			res = val[0].Interface().(response.Response)
-		} else {
-			res = ServerError(err)
+func Wrap(handler func(c *contextmodel.ReqContext) response.Response) web.Handler {
+	return func(c *contextmodel.ReqContext) {
+		if res := handler(c); res != nil {
+			res.WriteTo(c)
 		}
-
-		res.WriteTo(c)
 	}
 }

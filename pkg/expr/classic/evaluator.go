@@ -6,15 +6,32 @@ import (
 	"github.com/grafana/grafana/pkg/expr/mathexp"
 )
 
+type EvaluatorKind int
+
+const (
+	EvaluatorNoValue = iota
+	EvaluatorThreshold
+	EvaluatorRanged
+)
+
 type evaluator interface {
 	Eval(mathexp.Number) bool
+	Kind() EvaluatorKind
 }
 
 type noValueEvaluator struct{}
 
+func (noValueEvaluator) Kind() EvaluatorKind {
+	return EvaluatorNoValue
+}
+
 type thresholdEvaluator struct {
 	Type      string
 	Threshold float64
+}
+
+func (thresholdEvaluator) Kind() EvaluatorKind {
+	return EvaluatorThreshold
 }
 
 type rangedEvaluator struct {
@@ -23,13 +40,17 @@ type rangedEvaluator struct {
 	Upper float64
 }
 
+func (rangedEvaluator) Kind() EvaluatorKind {
+	return EvaluatorRanged
+}
+
 // newAlertEvaluator is a factory function for returning
 // an AlertEvaluator depending on evaluation operator.
 func newAlertEvaluator(model ConditionEvalJSON) (evaluator, error) {
 	switch model.Type {
-	case "gt", "lt":
+	case "gt", "lt", "eq", "ne", "gte", "lte":
 		return newThresholdEvaluator(model)
-	case "within_range", "outside_range":
+	case "within_range", "outside_range", "within_range_included", "outside_range_included":
 		return newRangedEvaluator(model)
 	case "no_value":
 		return &noValueEvaluator{}, nil
@@ -49,6 +70,14 @@ func (e *thresholdEvaluator) Eval(reducedValue mathexp.Number) bool {
 		return *fv > e.Threshold
 	case "lt":
 		return *fv < e.Threshold
+	case "eq":
+		return *fv == e.Threshold
+	case "ne":
+		return *fv != e.Threshold
+	case "gte":
+		return *fv >= e.Threshold
+	case "lte":
+		return *fv <= e.Threshold
 	}
 
 	return false
@@ -92,6 +121,10 @@ func (e *rangedEvaluator) Eval(reducedValue mathexp.Number) bool {
 		return (e.Lower < *fv && e.Upper > *fv) || (e.Upper < *fv && e.Lower > *fv)
 	case "outside_range":
 		return (e.Upper < *fv && e.Lower < *fv) || (e.Upper > *fv && e.Lower > *fv)
+	case "within_range_included":
+		return (e.Lower <= *fv && e.Upper >= *fv) || (e.Upper <= *fv && e.Lower >= *fv)
+	case "outside_range_included":
+		return (e.Upper <= *fv && e.Lower <= *fv) || (e.Upper >= *fv && e.Lower >= *fv)
 	}
 
 	return false

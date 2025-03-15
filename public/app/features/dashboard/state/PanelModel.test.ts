@@ -1,7 +1,6 @@
-import { PanelModel } from './PanelModel';
-import { getPanelPlugin } from '../../plugins/__mocks__/pluginMocks';
+import { ComponentClass } from 'react';
+
 import {
-  DataLinkBuiltInVars,
   FieldConfigProperty,
   PanelData,
   PanelProps,
@@ -9,27 +8,24 @@ import {
   standardFieldConfigEditorRegistry,
   dateTime,
   TimeRange,
+  PanelMigrationHandler,
+  PanelTypeChangedHandler,
 } from '@grafana/data';
-import { ComponentClass } from 'react';
-import { PanelQueryRunner } from '../../query/state/PanelQueryRunner';
-import { setTimeSrv } from '../services/TimeSrv';
-import { TemplateSrv } from '../../templating/template_srv';
+import { getPanelPlugin } from '@grafana/data/test/__mocks__/pluginMocks';
+import { mockStandardFieldConfigOptions } from '@grafana/data/test/helpers/fieldConfig';
 import { setTemplateSrv } from '@grafana/runtime';
+import { queryBuilder } from 'app/features/variables/shared/testing/builders';
+
+import { PanelQueryRunner } from '../../query/state/PanelQueryRunner';
+import { TemplateSrv } from '../../templating/template_srv';
 import { variableAdapters } from '../../variables/adapters';
 import { createQueryVariableAdapter } from '../../variables/query/adapter';
-import { mockStandardFieldConfigOptions } from '../../../../test/helpers/fieldConfig';
-import { queryBuilder } from 'app/features/variables/shared/testing/builders';
 import { TimeOverrideResult } from '../utils/panel';
+
+import { PanelModel } from './PanelModel';
 
 standardFieldConfigEditorRegistry.setInit(() => mockStandardFieldConfigOptions());
 standardEditorsRegistry.setInit(() => mockStandardFieldConfigOptions());
-
-setTimeSrv({
-  timeRangeForUrl: () => ({
-    from: 1607687293000,
-    to: 1607687293100,
-  }),
-} as any);
 
 const getVariables = () => variablesMock;
 const getVariableWithName = (name: string) => variablesMock.filter((v) => v.name === name)[0];
@@ -48,14 +44,14 @@ variableAdapters.setInit(() => [createQueryVariableAdapter()]);
 describe('PanelModel', () => {
   describe('when creating new panel model', () => {
     let model: any;
-    let modelJson: any;
+    let modelJson: Record<string, unknown>;
     let persistedOptionsMock;
 
     const tablePlugin = getPanelPlugin(
       {
         id: 'table',
       },
-      (null as unknown) as ComponentClass<PanelProps>, // react
+      null as unknown as ComponentClass<PanelProps>, // react
       {} // angular
     );
 
@@ -86,7 +82,7 @@ describe('PanelModel', () => {
       },
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
       persistedOptionsMock = {
         fieldOptions: {
           thresholds: [
@@ -147,7 +143,44 @@ describe('PanelModel', () => {
       };
 
       model = new PanelModel(modelJson);
-      model.pluginLoaded(tablePlugin);
+      await model.pluginLoaded(tablePlugin);
+    });
+
+    describe('migrations', () => {
+      let initialMigrator: PanelMigrationHandler<(typeof model)['options']> | undefined = undefined;
+
+      beforeEach(() => {
+        initialMigrator = tablePlugin.onPanelMigration;
+      });
+      afterEach(() => {
+        tablePlugin.onPanelMigration = initialMigrator;
+      });
+
+      it('should run sync migrations', async () => {
+        model.options.valueToMigrate = 'old-legacy';
+
+        tablePlugin.onPanelMigration = (p) => ({ ...p.options, valueToMigrate: 'new-version' });
+
+        tablePlugin.onPanelMigration = (p) => {
+          p.options.valueToMigrate = 'new-version';
+          return p.options;
+        };
+
+        await model.pluginLoaded(tablePlugin);
+        expect(model.options).toMatchObject({ valueToMigrate: 'new-version' });
+      });
+
+      it('should run async migrations', async () => {
+        model.options.valueToMigrate = 'old-legacy';
+
+        tablePlugin.onPanelMigration = async (p) =>
+          new Promise((resolve) => {
+            setTimeout(() => resolve({ ...p.options, valueToMigrate: 'new-version' }), 10);
+          });
+
+        await model.pluginLoaded(tablePlugin);
+        expect(model.options).toMatchObject({ valueToMigrate: 'new-version' });
+      });
     });
 
     it('should apply defaults', () => {
@@ -196,14 +229,30 @@ describe('PanelModel', () => {
       expect(saveModel.gridPos).toBe(undefined);
     });
 
-    it('getSaveModel should not remove datasource default', () => {
-      const saveModel = model.getSaveModel();
-      expect(saveModel.datasource).toBe(null);
-    });
-
     it('getSaveModel should remove nonPersistedProperties', () => {
       const saveModel = model.getSaveModel();
       expect(saveModel.events).toBe(undefined);
+    });
+
+    it('getSaveModel should clean libraryPanels from a collapsed row', () => {
+      const newmodelJson = {
+        type: 'row',
+        panels: [
+          {
+            ...modelJson,
+            libraryPanel: {
+              uid: 'BVIBScisnl',
+              model: modelJson,
+              name: 'Library panel title',
+            },
+          },
+          modelJson,
+        ],
+      };
+      const newmodel = new PanelModel(newmodelJson);
+      const saveModel = newmodel.getSaveModel();
+      expect(saveModel.panels[0].tagrets).toBe(undefined);
+      expect(saveModel.panels[1].targets).toBeTruthy();
     });
 
     describe('variables interpolation', () => {
@@ -213,25 +262,28 @@ describe('PanelModel', () => {
           bbb: { value: 'BBB', text: 'upperB' },
         };
       });
+
       it('should interpolate variables', () => {
         const out = model.replaceVariables('hello $aaa');
         expect(out).toBe('hello AAA');
-      });
-
-      it('should interpolate $__url_time_range variable', () => {
-        const out = model.replaceVariables(`/d/1?$${DataLinkBuiltInVars.keepTime}`);
-        expect(out).toBe('/d/1?from=1607687293000&to=1607687293100');
-      });
-
-      it('should interpolate $__all_variables variable', () => {
-        const out = model.replaceVariables(`/d/1?$${DataLinkBuiltInVars.includeVars}`);
-        expect(out).toBe('/d/1?var-test1=val1&var-test2=val2&var-test3=Value%203&var-test4=A&var-test4=B');
       });
 
       it('should prefer the local variable value', () => {
         const extra = { aaa: { text: '???', value: 'XXX' } };
         const out = model.replaceVariables('hello $aaa and $bbb', extra);
         expect(out).toBe('hello XXX and BBB');
+      });
+
+      it('Can use request scoped vars', () => {
+        model.getQueryRunner().getLastRequest = () => {
+          return {
+            scopedVars: {
+              __interval: { text: '10m', value: '10m' },
+            },
+          };
+        };
+        const out = model.replaceVariables('hello $__interval');
+        expect(out).toBe('hello 10m');
       });
     });
 
@@ -265,7 +317,6 @@ describe('PanelModel', () => {
           });
         });
 
-        model.editSourceId = 1001;
         model.fieldConfig.defaults.decimals = 3;
         model.fieldConfig.defaults.custom = {
           customProp: true,
@@ -287,10 +338,6 @@ describe('PanelModel', () => {
         ];
         model.changePlugin(newPlugin);
         model.alert = { id: 2 };
-      });
-
-      it('should keep editSourceId', () => {
-        expect(model.editSourceId).toBe(1001);
       });
 
       it('should keep maxDataPoints', () => {
@@ -342,10 +389,12 @@ describe('PanelModel', () => {
     });
 
     describe('when changing to react panel from angular panel', () => {
-      let panelQueryRunner: any;
+      let panelQueryRunner: PanelQueryRunner;
 
       const onPanelTypeChanged = jest.fn();
-      const reactPlugin = getPanelPlugin({ id: 'react' }).setPanelChangeHandler(onPanelTypeChanged as any);
+      const reactPlugin = getPanelPlugin({ id: 'react' }).setPanelChangeHandler(
+        onPanelTypeChanged as PanelTypeChangedHandler
+      );
 
       beforeEach(() => {
         model.changePlugin(reactPlugin);
@@ -365,11 +414,51 @@ describe('PanelModel', () => {
       });
     });
 
+    describe('when autoMigrateFrom angular to react', () => {
+      const onPanelTypeChanged: PanelTypeChangedHandler = (panel, prevPluginId, prevOptions) => {
+        panel.fieldConfig = { defaults: { unit: 'bytes' }, overrides: [] };
+        return { name: prevOptions.angular.oldName };
+      };
+
+      const reactPlugin = getPanelPlugin({ id: 'timeseries' })
+        .setPanelChangeHandler(onPanelTypeChanged)
+        .useFieldConfig({
+          disableStandardOptions: [FieldConfigProperty.Thresholds],
+        })
+        .setPanelOptions((builder) => {
+          builder.addTextInput({
+            name: 'Name',
+            path: 'name',
+          });
+        });
+
+      beforeEach(() => {
+        model = new PanelModel({
+          autoMigrateFrom: 'graph',
+          oldName: 'old name',
+          type: 'timeseries',
+        });
+
+        model.pluginLoaded(reactPlugin);
+      });
+
+      it('should run panel changed handler and remove old model props', () => {
+        expect(model.options).toEqual({ name: 'old name' });
+        expect(model.fieldConfig).toEqual({ defaults: { unit: 'bytes' }, overrides: [] });
+        expect(model.autoMigrateFrom).toBe(undefined);
+        expect(model.oldName).toBe(undefined);
+        expect(model.plugin).toBe(reactPlugin);
+        expect(model.type).toBe('timeseries');
+      });
+    });
+
     describe('variables interpolation', () => {
-      let panelQueryRunner: any;
+      let panelQueryRunner: PanelQueryRunner;
 
       const onPanelTypeChanged = jest.fn();
-      const reactPlugin = getPanelPlugin({ id: 'react' }).setPanelChangeHandler(onPanelTypeChanged as any);
+      const reactPlugin = getPanelPlugin({ id: 'react' }).setPanelChangeHandler(
+        onPanelTypeChanged as PanelTypeChangedHandler
+      );
 
       beforeEach(() => {
         model.changePlugin(reactPlugin);
@@ -430,10 +519,30 @@ describe('PanelModel', () => {
       });
     });
 
+    describe('updateGridPos', () => {
+      it('Should not have changes if no change', () => {
+        model.gridPos = { w: 1, h: 1, x: 1, y: 2 };
+        model.updateGridPos({ w: 1, h: 1, x: 1, y: 2 });
+        expect(model.hasChanged).toBe(false);
+      });
+
+      it('Should have changes if gridPos is different', () => {
+        model.gridPos = { w: 1, h: 1, x: 1, y: 2 };
+        model.updateGridPos({ w: 10, h: 1, x: 1, y: 2 });
+        expect(model.hasChanged).toBe(true);
+      });
+
+      it('Should not have changes if not manually updated', () => {
+        model.gridPos = { w: 1, h: 1, x: 1, y: 2 };
+        model.updateGridPos({ w: 10, h: 1, x: 1, y: 2 }, false);
+        expect(model.hasChanged).toBe(false);
+      });
+    });
+
     describe('destroy', () => {
       it('Should still preserve last query result', () => {
         model.getQueryRunner().useLastResultFrom({
-          getLastResult: () => ({} as PanelData),
+          getLastResult: () => ({}) as PanelData,
         } as PanelQueryRunner);
 
         model.destroy();
@@ -467,6 +576,7 @@ describe('PanelModel', () => {
           run: jest.fn(),
         });
         const dashboardId = 123;
+        const dashboardUID = 'ggHbN42mk';
         const dashboardTimezone = 'browser';
         const width = 860;
         const timeData = {
@@ -481,7 +591,7 @@ describe('PanelModel', () => {
           } as TimeRange,
         } as TimeOverrideResult;
 
-        model.runAllPanelQueries(dashboardId, dashboardTimezone, timeData, width);
+        model.runAllPanelQueries({ dashboardId, dashboardUID, dashboardTimezone, timeData, width });
 
         expect(model.getQueryRunner).toBeCalled();
       });
