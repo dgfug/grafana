@@ -1,13 +1,13 @@
-import angular from 'angular';
 import $ from 'jquery';
 import { partition, each } from 'lodash';
 //@ts-ignore
 import Drop from 'tether-drop';
-import { CreatePlotOverlay } from '@grafana/data';
 
-/** @ngInject */
+import { CreatePlotOverlay } from '@grafana/data';
+import { getLegacyAngularInjector } from '@grafana/runtime';
+
 const createAnnotationToolip: CreatePlotOverlay = (element, event, plot) => {
-  const injector = angular.element(document).injector();
+  const injector = getLegacyAngularInjector();
   const content = document.createElement('div');
   content.innerHTML = '<annotation-tooltip event="event" on-edit="onEdit()"></annotation-tooltip>';
 
@@ -51,7 +51,6 @@ const createAnnotationToolip: CreatePlotOverlay = (element, event, plot) => {
 
 let markerElementToAttachTo: any = null;
 
-/** @ngInject */
 const createEditPopover: CreatePlotOverlay = (element, event, plot) => {
   const eventManager = plot.getOptions().events.manager;
   if (eventManager.editorOpen) {
@@ -68,7 +67,7 @@ const createEditPopover: CreatePlotOverlay = (element, event, plot) => {
 
   // wait for element to be attached and positioned
   setTimeout(() => {
-    const injector = angular.element(document).injector();
+    const injector = getLegacyAngularInjector();
     const content = document.createElement('div');
     content.innerHTML = '<event-editor panel-ctrl="panelCtrl" event="event" close="close()"></event-editor>';
 
@@ -144,7 +143,6 @@ export class DrawableEvent {
   _width: any;
   _height: any;
 
-  /** @ngInject */
   constructor(
     object: JQuery,
     drawFunc: any,
@@ -197,7 +195,6 @@ export class VisualEvent {
   _drawableEvent: any;
   _hidden: any;
 
-  /** @ngInject */
   constructor(options: any, drawableEvent: DrawableEvent) {
     this._options = options;
     this._drawableEvent = drawableEvent;
@@ -233,7 +230,6 @@ export class EventMarkers {
   _plot: any;
   eventsEnabled: any;
 
-  /** @ngInject */
   constructor(plot: any) {
     this._events = [];
     this._types = [];
@@ -631,8 +627,6 @@ export class EventMarkers {
 /**
  * initialize the plugin for the given plot
  */
-
-/** @ngInject */
 export function init(this: any, plot: any) {
   const that = this;
   const eventMarkers = new EventMarkers(plot);

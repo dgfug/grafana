@@ -1,40 +1,55 @@
-import React, { useMemo, useState } from 'react';
-import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { CustomScrollbar, FilterInput, RadioButtonGroup, useStyles2 } from '@grafana/ui';
-import { getPanelFrameCategory } from './getPanelFrameOptions';
-import { getVizualizationOptions } from './getVizualizationOptions';
 import { css } from '@emotion/css';
-import { OptionsPaneCategory } from './OptionsPaneCategory';
-import { getFieldOverrideCategories } from './getFieldOverrideElements';
-import { OptionsPaneCategoryDescriptor } from './OptionsPaneCategoryDescriptor';
-import { OptionSearchEngine } from './state/OptionSearchEngine';
-import { AngularPanelOptions } from './AngularPanelOptions';
-import { getRecentOptions } from './state/getRecentOptions';
+import { useMemo, useState } from 'react';
+import * as React from 'react';
+
+import { GrafanaTheme2, SelectableValue } from '@grafana/data';
+import { config } from '@grafana/runtime';
+import { FilterInput, RadioButtonGroup, ScrollContainer, useStyles2 } from '@grafana/ui';
+import { AngularDeprecationPluginNotice } from 'app/features/plugins/angularDeprecation/AngularDeprecationPluginNotice';
+
 import { isPanelModelLibraryPanel } from '../../../library-panels/guard';
+
+import { AngularPanelOptions } from './AngularPanelOptions';
+import { OptionsPaneCategory } from './OptionsPaneCategory';
+import { OptionsPaneCategoryDescriptor } from './OptionsPaneCategoryDescriptor';
+import { getFieldOverrideCategories } from './getFieldOverrideElements';
 import { getLibraryPanelOptionsCategory } from './getLibraryPanelOptions';
+import { getPanelFrameCategory } from './getPanelFrameOptions';
+import { getVisualizationOptions } from './getVisualizationOptions';
+import { OptionSearchEngine } from './state/OptionSearchEngine';
+import { getRecentOptions } from './state/getRecentOptions';
 import { OptionPaneRenderProps } from './types';
 
-export const OptionsPaneOptions: React.FC<OptionPaneRenderProps> = (props) => {
+export const OptionsPaneOptions = (props: OptionPaneRenderProps) => {
   const { plugin, dashboard, panel } = props;
   const [searchQuery, setSearchQuery] = useState('');
   const [listMode, setListMode] = useState(OptionFilter.All);
   const styles = useStyles2(getStyles);
 
-  const [panelFrameOptions, vizOptions, justOverrides, libraryPanelOptions] = useMemo(
-    () => [
-      getPanelFrameCategory(props),
-      getVizualizationOptions(props),
-      getFieldOverrideCategories(props),
-      getLibraryPanelOptionsCategory(props),
-    ],
+  const [panelFrameOptions, vizOptions, libraryPanelOptions] = useMemo(
+    () => [getPanelFrameCategory(props), getVisualizationOptions(props), getLibraryPanelOptionsCategory(props)],
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [panel.configRev, props.data, props.instanceState]
+    [panel.configRev, props.data, props.instanceState, searchQuery]
+  );
+
+  const justOverrides = useMemo(
+    () =>
+      getFieldOverrideCategories(
+        props.panel.fieldConfig,
+        props.plugin.fieldConfigRegistry,
+        props.data?.series ?? [],
+        searchQuery,
+        props.onFieldConfigsChange
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [panel.configRev, props.data, props.instanceState, searchQuery]
   );
 
   const mainBoxElements: React.ReactNode[] = [];
   const isSearching = searchQuery.length > 0;
   const optionRadioFilters = useMemo(getOptionRadioFilters, []);
+
   const allOptions = isPanelModelLibraryPanel(panel)
     ? [libraryPanelOptions, panelFrameOptions, ...vizOptions]
     : [panelFrameOptions, ...vizOptions];
@@ -95,6 +110,16 @@ export const OptionsPaneOptions: React.FC<OptionPaneRenderProps> = (props) => {
   return (
     <div className={styles.wrapper}>
       <div className={styles.formBox}>
+        {panel.isAngularPlugin() && !plugin.meta.angular?.hideDeprecation && (
+          <AngularDeprecationPluginNotice
+            className={styles.angularDeprecationWrapper}
+            showPluginDetailsLink={true}
+            pluginId={plugin.meta.id}
+            pluginType={plugin.meta.type}
+            angularSupportEnabled={config?.angularSupportEnabled}
+            interactionElementId="panel-options"
+          />
+        )}
         <div className={styles.formRow}>
           <FilterInput width={0} value={searchQuery} onChange={setSearchQuery} placeholder={'Search options'} />
         </div>
@@ -104,11 +129,9 @@ export const OptionsPaneOptions: React.FC<OptionPaneRenderProps> = (props) => {
           </div>
         )}
       </div>
-      <div className={styles.scrollWrapper}>
-        <CustomScrollbar autoHeightMin="100%">
-          <div className={styles.mainBox}>{mainBoxElements}</div>
-        </CustomScrollbar>
-      </div>
+      <ScrollContainer>
+        <div className={styles.mainBox}>{mainBoxElements}</div>
+      </ScrollContainer>
     </div>
   );
 };
@@ -126,7 +149,7 @@ export enum OptionFilter {
   Recent = 'Recent',
 }
 
-function renderSearchHits(
+export function renderSearchHits(
   allOptions: OptionsPaneCategoryDescriptor[],
   overrides: OptionsPaneCategoryDescriptor[],
   searchQuery: string
@@ -150,51 +173,51 @@ function renderSearchHits(
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  wrapper: css`
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 0;
+  wrapper: css({
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
 
-    .search-fragment-highlight {
-      color: ${theme.colors.warning.text};
-      background: transparent;
-    }
-  `,
-  searchBox: css`
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  `,
-  formRow: css`
-    margin-bottom: ${theme.spacing(1)};
-  `,
-  formBox: css`
-    padding: ${theme.spacing(1)};
-    background: ${theme.colors.background.primary};
-    border: 1px solid ${theme.components.panel.borderColor};
-    border-bottom: none;
-  `,
-  closeButton: css`
-    margin-left: ${theme.spacing(1)};
-  `,
-  searchHits: css`
-    padding: ${theme.spacing(1, 1, 0, 1)};
-  `,
-  scrollWrapper: css`
-    flex-grow: 1;
-    min-height: 0;
-  `,
-  searchNotice: css`
-    font-size: ${theme.typography.size.sm};
-    color: ${theme.colors.text.secondary};
-    padding: ${theme.spacing(1)};
-    text-align: center;
-  `,
-  mainBox: css`
-    background: ${theme.colors.background.primary};
-    border: 1px solid ${theme.components.panel.borderColor};
-    border-top: none;
-    flex-grow: 1;
-  `,
+    '.search-fragment-highlight': {
+      color: theme.colors.warning.text,
+      background: 'transparent',
+    },
+  }),
+  searchBox: css({
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
+  }),
+  formRow: css({
+    marginBottom: theme.spacing(1),
+  }),
+  formBox: css({
+    padding: theme.spacing(1),
+    background: theme.colors.background.primary,
+    border: `1px solid ${theme.components.panel.borderColor}`,
+    borderTopLeftRadius: theme.shape.borderRadius(1.5),
+    borderBottom: 'none',
+  }),
+  closeButton: css({
+    marginLeft: theme.spacing(1),
+  }),
+  searchHits: css({
+    padding: theme.spacing(1, 1, 0, 1),
+  }),
+  searchNotice: css({
+    fontSize: theme.typography.size.sm,
+    color: theme.colors.text.secondary,
+    padding: theme.spacing(1),
+    textAlign: 'center',
+  }),
+  mainBox: css({
+    background: theme.colors.background.primary,
+    border: `1px solid ${theme.components.panel.borderColor}`,
+    borderTop: 'none',
+    flexGrow: 1,
+  }),
+  angularDeprecationWrapper: css({
+    padding: theme.spacing(1),
+  }),
 });

@@ -1,47 +1,50 @@
-import React from 'react';
-import { Slider } from '@grafana/ui';
-import { SliderProps } from './types';
-import { Story, Meta } from '@storybook/react';
+import { StoryFn, Meta } from '@storybook/react';
 
-export default {
+import { Slider } from './Slider';
+
+const meta: Meta<typeof Slider> = {
   title: 'Forms/Slider',
   component: Slider,
   parameters: {
     controls: {
-      exclude: ['step', 'formatTooltipResult', 'onChange', 'onAfterChange', 'value', 'tooltipAlwaysVisible'],
+      exclude: ['formatTooltipResult', 'onChange', 'onAfterChange', 'value', 'tooltipAlwaysVisible'],
     },
     knobs: {
       disabled: true,
     },
   },
   argTypes: {
-    isStep: { name: 'Step' },
     orientation: { control: { type: 'select', options: ['horizontal', 'vertical'] } },
+    step: { control: { type: 'number', min: 1 } },
   },
-} as Meta;
+  args: {
+    min: 0,
+    max: 100,
+    value: 10,
+    orientation: 'horizontal',
+    reverse: false,
+    included: true,
+    step: undefined,
+  },
+};
 
-interface StoryProps extends Partial<SliderProps> {
-  isStep: boolean;
-}
-
-export const Basic: Story<StoryProps> = (args) => {
+export const Basic: StoryFn<typeof Slider> = (args) => {
   return (
     <div style={{ width: '300px', height: '300px' }}>
-      <Slider
-        step={args.isStep ? 10 : undefined}
-        value={args.value}
-        min={args.min as number}
-        max={args.max as number}
-        {...args}
-      />
+      <Slider {...args} />
     </div>
   );
 };
-Basic.args = {
-  min: 0,
-  max: 100,
-  value: 10,
-  isStep: false,
-  orientation: 'horizontal',
-  reverse: false,
+
+export const WithMarks: StoryFn<typeof Slider> = (args) => {
+  return (
+    <div style={{ width: '300px', height: '300px' }}>
+      <Slider {...args} />
+    </div>
+  );
 };
+WithMarks.args = {
+  marks: { 0: '0', 25: '25', 50: '50', 75: '75', 100: '100' },
+};
+
+export default meta;

@@ -1,9 +1,10 @@
+import { localTimeFormat, systemDateFormats } from '../datetime/formats';
+import { dateTimeFormat, dateTimeFormatTimeAgo } from '../datetime/formatter';
 import { toDuration as duration, toUtc, dateTime } from '../datetime/moment_wrapper';
+import { DecimalCount } from '../types/displayValue';
+import { TimeZone } from '../types/time';
 
 import { toFixed, toFixedScaled, FormattedValue, ValueFormatter } from './valueFormats';
-import { DecimalCount } from '../types/displayValue';
-import { TimeZone } from '../types';
-import { dateTimeFormat, dateTimeFormatTimeAgo, localTimeFormat, systemDateFormats } from '../datetime';
 
 interface IntervalsInSeconds {
   [interval: string]: number;
@@ -19,6 +20,17 @@ export enum Interval {
   Second = 'second',
   Millisecond = 'millisecond',
 }
+
+const UNITS = [
+  Interval.Year,
+  Interval.Month,
+  Interval.Week,
+  Interval.Day,
+  Interval.Hour,
+  Interval.Minute,
+  Interval.Second,
+  Interval.Millisecond,
+];
 
 const INTERVALS_IN_SECONDS: IntervalsInSeconds = {
   [Interval.Year]: 31536000,
@@ -89,13 +101,6 @@ export function toMilliSeconds(size: number, decimals?: DecimalCount, scaledDeci
   }
 
   return toFixedScaled(size / 31536000000, decimals, ' year');
-}
-
-export function trySubstract(value1: DecimalCount, value2: DecimalCount): DecimalCount {
-  if (value1 !== null && value1 !== undefined && value2 !== null && value2 !== undefined) {
-    return value1 - value2;
-  }
-  return undefined;
 }
 
 export function toSeconds(size: number, decimals?: DecimalCount): FormattedValue {
@@ -180,7 +185,7 @@ export function toDays(size: number, decimals?: DecimalCount): FormattedValue {
   }
 
   if (Math.abs(size) < 7) {
-    return { text: toFixed(size, decimals), suffix: ' day' };
+    return toFixedScaled(size, decimals, ' day');
   } else if (Math.abs(size) < 365) {
     return toFixedScaled(size / 7, decimals, ' week');
   } else {
@@ -206,17 +211,6 @@ export function toDuration(size: number, decimals: DecimalCount, timeScale: Inte
     return v;
   }
 
-  const units = [
-    { long: Interval.Year },
-    { long: Interval.Month },
-    { long: Interval.Week },
-    { long: Interval.Day },
-    { long: Interval.Hour },
-    { long: Interval.Minute },
-    { long: Interval.Second },
-    { long: Interval.Millisecond },
-  ];
-
   // convert $size to milliseconds
   // intervals_in_seconds uses seconds (duh), convert them to milliseconds here to minimize floating point errors
   size *= INTERVALS_IN_SECONDS[timeScale] * 1000;
@@ -228,16 +222,16 @@ export function toDuration(size: number, decimals: DecimalCount, timeScale: Inte
   let decimalsCount = 0;
 
   if (decimals !== null && decimals !== undefined) {
-    decimalsCount = decimals as number;
+    decimalsCount = decimals;
   }
 
-  for (let i = 0; i < units.length && decimalsCount >= 0; i++) {
-    const interval = INTERVALS_IN_SECONDS[units[i].long] * 1000;
+  for (let i = 0; i < UNITS.length && decimalsCount >= 0; i++) {
+    const interval = INTERVALS_IN_SECONDS[UNITS[i]] * 1000;
     const value = size / interval;
     if (value >= 1 || decrementDecimals) {
       decrementDecimals = true;
       const floor = Math.floor(value);
-      const unit = units[i].long + (floor !== 1 ? 's' : '');
+      const unit = UNITS[i] + (floor !== 1 ? 's' : '');
       strings.push(floor + ' ' + unit);
       size = size % interval;
       decimalsCount--;
@@ -281,7 +275,7 @@ export function toClock(size: number, decimals?: DecimalCount): FormattedValue {
 
   let format = 'mm\\m:ss\\s:SSS\\m\\s';
 
-  const hours = `${('0' + Math.floor(duration(size, 'milliseconds').asHours())).slice(-2)}h`;
+  const hours = `${Math.floor(duration(size, 'milliseconds').asHours())}h`;
 
   if (decimals === 0) {
     format = '';

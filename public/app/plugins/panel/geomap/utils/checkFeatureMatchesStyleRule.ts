@@ -1,5 +1,8 @@
 import { FeatureLike } from 'ol/Feature';
-import { FeatureRuleConfig, ComparisonOperation } from '../types';
+
+import { compareValues } from '@grafana/data/src/transformations/matchers/compareValues';
+
+import { FeatureRuleConfig } from '../types';
 
 /**
  * Check whether feature has property value that matches rule
@@ -8,18 +11,6 @@ import { FeatureRuleConfig, ComparisonOperation } from '../types';
  * @returns boolean
  */
 export const checkFeatureMatchesStyleRule = (rule: FeatureRuleConfig, feature: FeatureLike) => {
-  switch (rule.operation) {
-    case ComparisonOperation.EQ:
-      return feature.get(rule.property) === rule.value;
-    case ComparisonOperation.GT:
-      return feature.get(rule.property) > rule.value;
-    case ComparisonOperation.GTE:
-      return feature.get(rule.property) >= rule.value;
-    case ComparisonOperation.LT:
-      return feature.get(rule.property) < rule.value;
-    case ComparisonOperation.LTE:
-      return feature.get(rule.property) <= rule.value;
-    default:
-      return false;
-  }
+  const val = feature.get(rule.property);
+  return compareValues(val, rule.operation, rule.value);
 };
