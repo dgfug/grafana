@@ -1,17 +1,17 @@
-import React from 'react';
-import { Button, InfoBox, Portal, stylesFactory, useTheme2 } from '@grafana/ui';
-import { getModalStyles } from '@grafana/ui/src/components/Modal/getModalStyles';
 import { css, cx } from '@emotion/css';
+
 import { GrafanaTheme2 } from '@grafana/data';
+import { Button, InfoBox, Portal, useStyles2, useTheme2 } from '@grafana/ui';
+import { getModalStyles } from '@grafana/ui/internal';
+import { Trans, t } from 'app/core/internationalization';
 
 interface Props {
   maxConcurrentSessions?: number;
 }
 
 export const TokenRevokedModal = (props: Props) => {
+  const styles = useStyles2(getStyles);
   const theme = useTheme2();
-
-  const styles = getStyles(theme);
   const modalStyles = getModalStyles(theme);
 
   const showMaxConcurrentSessions = Boolean(props.maxConcurrentSessions);
@@ -23,7 +23,14 @@ export const TokenRevokedModal = (props: Props) => {
   return (
     <Portal>
       <div className={modalStyles.modal}>
-        <InfoBox title="You have been automatically signed out" severity="warning" className={styles.infobox}>
+        <InfoBox
+          title={t(
+            'users.token-revoked-modal.title-you-have-been-automatically-signed-out',
+            'You have been automatically signed out'
+          )}
+          severity="warning"
+          className={styles.infobox}
+        >
           <div className={styles.text}>
             <p>
               Your session token was automatically revoked because you have reached
@@ -41,7 +48,7 @@ export const TokenRevokedModal = (props: Props) => {
             </p>
           </div>
           <Button size="md" variant="primary" onClick={redirectToLogin}>
-            Sign in
+            <Trans i18nKey="users.token-revoked-modal.sign-in">Sign in</Trans>
           </Button>
         </InfoBox>
       </div>
@@ -50,17 +57,15 @@ export const TokenRevokedModal = (props: Props) => {
   );
 };
 
-const getStyles = stylesFactory((theme: GrafanaTheme2) => {
-  return {
-    infobox: css`
-      margin-bottom: 0;
-    `,
-    text: css`
-      margin: ${theme.spacing(1, 0, 2)};
-    `,
-    backdrop: css`
-      background-color: ${theme.colors.background.canvas};
-      opacity: 0.8;
-    `,
-  };
+const getStyles = (theme: GrafanaTheme2) => ({
+  infobox: css({
+    marginBottom: 0,
+  }),
+  text: css({
+    margin: theme.spacing(1, 0, 2),
+  }),
+  backdrop: css({
+    backgroundColor: theme.colors.background.canvas,
+    opacity: 0.8,
+  }),
 });

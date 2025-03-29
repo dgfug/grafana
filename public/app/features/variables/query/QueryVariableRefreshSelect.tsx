@@ -1,12 +1,14 @@
-import React, { PropsWithChildren, useMemo } from 'react';
-import { SelectableValue } from '@grafana/data';
-import { selectors } from '@grafana/e2e-selectors';
-import { VariableSelectField } from '../editor/VariableSelectField';
-import { VariableRefresh } from '../types';
+import { PropsWithChildren, useMemo, useState } from 'react';
+
+import { VariableRefresh } from '@grafana/data';
+import { Field, RadioButtonGroup, useTheme2 } from '@grafana/ui';
+import { useMediaQueryChange } from 'app/core/hooks/useMediaQueryChange';
+import { t } from 'app/core/internationalization';
 
 interface Props {
-  onChange: (option: SelectableValue<VariableRefresh>) => void;
+  onChange: (option: VariableRefresh) => void;
   refresh: VariableRefresh;
+  testId?: string;
 }
 
 const REFRESH_OPTIONS = [
@@ -14,18 +16,37 @@ const REFRESH_OPTIONS = [
   { label: 'On time range change', value: VariableRefresh.onTimeRangeChanged },
 ];
 
-export function QueryVariableRefreshSelect({ onChange, refresh }: PropsWithChildren<Props>) {
-  const value = useMemo(() => REFRESH_OPTIONS.find((o) => o.value === refresh) ?? REFRESH_OPTIONS[0], [refresh]);
+export function QueryVariableRefreshSelect({ onChange, refresh, testId }: PropsWithChildren<Props>) {
+  const theme = useTheme2();
+
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
+  useMediaQueryChange({
+    breakpoint: theme.breakpoints.values.sm,
+    onChange: (e) => {
+      setIsSmallScreen(!e.matches);
+    },
+  });
+
+  const value = useMemo(
+    () => REFRESH_OPTIONS.find((o) => o.value === refresh)?.value ?? REFRESH_OPTIONS[0].value,
+    [refresh]
+  );
 
   return (
-    <VariableSelectField
-      name="Refresh"
-      value={value}
-      options={REFRESH_OPTIONS}
-      onChange={onChange}
-      labelWidth={10}
-      ariaLabel={selectors.pages.Dashboard.Settings.Variables.Edit.QueryVariable.queryOptionsRefreshSelect}
-      tooltip="When to update the values of this variable."
-    />
+    <Field
+      label={t('variables.query-variable-refresh-select.label-refresh', 'Refresh')}
+      description={t(
+        'variables.query-variable-refresh-select.description-update-values-variable',
+        'When to update the values of this variable'
+      )}
+      data-testid={testId}
+    >
+      <RadioButtonGroup
+        options={REFRESH_OPTIONS}
+        onChange={onChange}
+        value={value}
+        size={isSmallScreen ? 'sm' : 'md'}
+      />
+    </Field>
   );
 }

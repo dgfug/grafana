@@ -1,4 +1,7 @@
-import React from 'react';
+import * as React from 'react';
+
+import { Box } from '@grafana/ui';
+
 import { OptionsPaneCategory } from './OptionsPaneCategory';
 import { OptionsPaneItemDescriptor } from './OptionsPaneItemDescriptor';
 
@@ -7,16 +10,17 @@ export interface OptionsPaneCategoryDescriptorProps {
   title: string;
   renderTitle?: (isExpanded: boolean) => React.ReactNode;
   isOpenDefault?: boolean;
-  forceOpen?: number;
+  forceOpen?: boolean;
   className?: string;
   isNested?: boolean;
   itemsCount?: number;
   customRender?: () => React.ReactNode;
+  sandboxId?: string;
 }
+
 /**
  * This is not a real React component but an intermediary to enable deep option search without traversing a React node tree.
  */
-
 export class OptionsPaneCategoryDescriptor {
   items: OptionsPaneItemDescriptor[] = [];
   categories: OptionsPaneCategoryDescriptor[] = [];
@@ -37,15 +41,36 @@ export class OptionsPaneCategoryDescriptor {
     return this;
   }
 
+  getCategory(name: string): OptionsPaneCategoryDescriptor {
+    let sub = this.categories.find((c) => c.props.id === name);
+    if (!sub) {
+      sub = new OptionsPaneCategoryDescriptor({
+        title: name,
+        id: name,
+      });
+      this.addCategory(sub);
+    }
+
+    return sub;
+  }
+
   render(searchQuery?: string) {
     if (this.props.customRender) {
       return this.props.customRender();
     }
 
+    if (this.props.title === '') {
+      return (
+        <Box padding={2} key={this.props.title}>
+          {this.items.map((item) => item.render(searchQuery))}
+        </Box>
+      );
+    }
+
     return (
       <OptionsPaneCategory key={this.props.title} {...this.props}>
-        {this.items.map((item) => item.render())}
-        {this.categories.map((category) => category.render())}
+        {this.items.map((item) => item.render(searchQuery))}
+        {this.categories.map((category) => category.render(searchQuery))}
       </OptionsPaneCategory>
     );
   }

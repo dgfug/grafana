@@ -1,9 +1,9 @@
-import React, { useCallback } from 'react';
-import { Button, VerticalGroup } from '@grafana/ui';
+import { useCallback } from 'react';
 
-import { Layout } from '@grafana/ui/src/components/Layout/Layout';
-import { PanelEditorTabId } from './types';
 import { locationService } from '@grafana/runtime';
+import { Button, Stack } from '@grafana/ui';
+
+import { PanelEditorTabId } from './types';
 
 export interface Props {
   message: string;
@@ -15,15 +15,17 @@ export function PanelNotSupported({ message }: Props): JSX.Element {
   }, []);
 
   return (
-    <Layout justify="center" style={{ marginTop: '100px' }}>
-      <VerticalGroup spacing="md">
-        <h2>{message}</h2>
-        <div>
-          <Button size="md" variant="secondary" icon="arrow-left" onClick={onBackToQueries}>
-            Go back to Queries
-          </Button>
-        </div>
-      </VerticalGroup>
-    </Layout>
+    <div style={{ marginTop: '100px' }}>
+      <Stack direction="row" justifyContent="center">
+        <Stack direction="column" gap={2}>
+          <h2>{message}</h2>
+          <div>
+            <Button size="md" variant="secondary" icon="arrow-left" onClick={onBackToQueries}>
+              Go back to Queries
+            </Button>
+          </div>
+        </Stack>
+      </Stack>
+    </div>
   );
 }
