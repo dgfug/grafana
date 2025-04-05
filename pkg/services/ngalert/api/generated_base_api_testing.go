@@ -9,40 +9,105 @@ package api
 import (
 	"net/http"
 
-	"github.com/go-macaron/binding"
-
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/middleware"
-	"github.com/grafana/grafana/pkg/models"
+	"github.com/grafana/grafana/pkg/middleware/requestmeta"
+	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	apimodels "github.com/grafana/grafana/pkg/services/ngalert/api/tooling/definitions"
 	"github.com/grafana/grafana/pkg/services/ngalert/metrics"
+	"github.com/grafana/grafana/pkg/web"
 )
 
-type TestingApiService interface {
-	RouteEvalQueries(*models.ReqContext, apimodels.EvalQueriesPayload) response.Response
-	RouteTestRuleConfig(*models.ReqContext, apimodels.TestRulePayload) response.Response
+type TestingApi interface {
+	BacktestConfig(*contextmodel.ReqContext) response.Response
+	RouteEvalQueries(*contextmodel.ReqContext) response.Response
+	RouteTestRuleConfig(*contextmodel.ReqContext) response.Response
+	RouteTestRuleGrafanaConfig(*contextmodel.ReqContext) response.Response
 }
 
-func (api *API) RegisterTestingApiEndpoints(srv TestingApiService, m *metrics.API) {
+func (f *TestingApiHandler) BacktestConfig(ctx *contextmodel.ReqContext) response.Response {
+	// Parse Request Body
+	conf := apimodels.BacktestConfig{}
+	if err := web.Bind(ctx.Req, &conf); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+	return f.handleBacktestConfig(ctx, conf)
+}
+func (f *TestingApiHandler) RouteEvalQueries(ctx *contextmodel.ReqContext) response.Response {
+	// Parse Request Body
+	conf := apimodels.EvalQueriesPayload{}
+	if err := web.Bind(ctx.Req, &conf); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+	return f.handleRouteEvalQueries(ctx, conf)
+}
+func (f *TestingApiHandler) RouteTestRuleConfig(ctx *contextmodel.ReqContext) response.Response {
+	// Parse Path Parameters
+	datasourceUIDParam := web.Params(ctx.Req)[":DatasourceUID"]
+	// Parse Request Body
+	conf := apimodels.TestRulePayload{}
+	if err := web.Bind(ctx.Req, &conf); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+	return f.handleRouteTestRuleConfig(ctx, conf, datasourceUIDParam)
+}
+func (f *TestingApiHandler) RouteTestRuleGrafanaConfig(ctx *contextmodel.ReqContext) response.Response {
+	// Parse Request Body
+	conf := apimodels.PostableExtendedRuleNodeExtended{}
+	if err := web.Bind(ctx.Req, &conf); err != nil {
+		return response.Error(http.StatusBadRequest, "bad request data", err)
+	}
+	return f.handleRouteTestRuleGrafanaConfig(ctx, conf)
+}
+
+func (api *API) RegisterTestingApiEndpoints(srv TestingApi, m *metrics.API) {
 	api.RouteRegister.Group("", func(group routing.RouteRegister) {
 		group.Post(
-			toMacaronPath("/api/v1/eval"),
-			binding.Bind(apimodels.EvalQueriesPayload{}),
+			toMacaronPath("/api/v1/rule/backtest"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodPost, "/api/v1/rule/backtest"),
 			metrics.Instrument(
 				http.MethodPost,
-				"/api/v1/eval",
-				srv.RouteEvalQueries,
+				"/api/v1/rule/backtest",
+				api.Hooks.Wrap(srv.BacktestConfig),
 				m,
 			),
 		)
 		group.Post(
-			toMacaronPath("/api/v1/rule/test/{Recipient}"),
-			binding.Bind(apimodels.TestRulePayload{}),
+			toMacaronPath("/api/v1/eval"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodPost, "/api/v1/eval"),
 			metrics.Instrument(
 				http.MethodPost,
-				"/api/v1/rule/test/{Recipient}",
-				srv.RouteTestRuleConfig,
+				"/api/v1/eval",
+				api.Hooks.Wrap(srv.RouteEvalQueries),
+				m,
+			),
+		)
+		group.Post(
+			toMacaronPath("/api/v1/rule/test/{DatasourceUID}"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodPost, "/api/v1/rule/test/{DatasourceUID}"),
+			metrics.Instrument(
+				http.MethodPost,
+				"/api/v1/rule/test/{DatasourceUID}",
+				api.Hooks.Wrap(srv.RouteTestRuleConfig),
+				m,
+			),
+		)
+		group.Post(
+			toMacaronPath("/api/v1/rule/test/grafana"),
+			requestmeta.SetOwner(requestmeta.TeamAlerting),
+			requestmeta.SetSLOGroup(requestmeta.SLOGroupHighSlow),
+			api.authorize(http.MethodPost, "/api/v1/rule/test/grafana"),
+			metrics.Instrument(
+				http.MethodPost,
+				"/api/v1/rule/test/grafana",
+				api.Hooks.Wrap(srv.RouteTestRuleGrafanaConfig),
 				m,
 			),
 		)

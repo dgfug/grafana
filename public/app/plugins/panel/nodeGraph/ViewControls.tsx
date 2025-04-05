@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Button, HorizontalGroup, useStyles, VerticalGroup } from '@grafana/ui';
 import { css } from '@emotion/css';
+import { useState } from 'react';
+
+import { Button, HorizontalGroup, useStyles2, VerticalGroup } from '@grafana/ui';
 
 function getStyles() {
   return {
-    wrapper: css`
-      label: wrapper;
-      pointer-events: all;
-    `,
+    wrapper: css({
+      label: 'wrapper',
+      pointerEvents: 'all',
+    }),
   };
 }
 
@@ -30,7 +31,7 @@ export function ViewControls<Config extends Record<string, any>>(props: Props<Co
 
   // For debugging the layout, should be removed here and maybe moved to panel config later on
   const allowConfiguration = false;
-  const styles = useStyles(getStyles);
+  const styles = useStyles2(getStyles);
 
   return (
     <div className={styles.wrapper}>
@@ -53,28 +54,10 @@ export function ViewControls<Config extends Record<string, any>>(props: Props<Co
             disabled={disableZoomOut}
           />
         </HorizontalGroup>
-        <HorizontalGroup spacing="xs">
-          <Button
-            icon={'code-branch'}
-            onClick={() => onConfigChange({ ...config, gridLayout: false })}
-            size={'md'}
-            title={'Default layout'}
-            variant="secondary"
-            disabled={!config.gridLayout}
-          />
-          <Button
-            icon={'apps'}
-            onClick={() => onConfigChange({ ...config, gridLayout: true })}
-            size={'md'}
-            title={'Grid layout'}
-            variant="secondary"
-            disabled={config.gridLayout}
-          />
-        </HorizontalGroup>
       </VerticalGroup>
 
       {allowConfiguration && (
-        <Button size={'xs'} variant={'link'} onClick={() => setShowConfig((showConfig) => !showConfig)}>
+        <Button size={'xs'} fill="text" onClick={() => setShowConfig((showConfig) => !showConfig)}>
           {showConfig ? 'Hide config' : 'Show config'}
         </Button>
       )}

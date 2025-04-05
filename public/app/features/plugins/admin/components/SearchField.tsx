@@ -1,6 +1,9 @@
-import { FilterInput } from '@grafana/ui';
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
+import * as React from 'react';
 import { useDebounce } from 'react-use';
+
+import { FilterInput } from '@grafana/ui';
+import { t } from 'app/core/internationalization';
 
 interface Props {
   value?: string;
@@ -9,7 +12,7 @@ interface Props {
 
 // useDebounce has a bug which causes it to fire on first render. This wrapper prevents that.
 // https://github.com/streamich/react-use/issues/759
-const useDebounceWithoutFirstRender = (callBack: () => any, delay = 0, deps: React.DependencyList = []) => {
+const useDebounceWithoutFirstRender = (callBack: () => void, delay = 0, deps: React.DependencyList = []) => {
   const isFirstRender = useRef(true);
   const debounceDeps = [...deps, isFirstRender];
 
@@ -39,7 +42,7 @@ export const SearchField = ({ value, onSearch }: Props) => {
           onSearch(e.currentTarget.value);
         }
       }}
-      placeholder="Search Grafana plugins"
+      placeholder={t('plugins.search-field.placeholder-search-grafana-plugins', 'Search Grafana plugins')}
       onChange={(value) => {
         setQuery(value);
       }}
