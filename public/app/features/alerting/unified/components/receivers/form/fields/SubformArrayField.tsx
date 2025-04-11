@@ -1,11 +1,14 @@
-import React, { FC } from 'react';
-import { NotificationChannelOption } from 'app/types';
-import { FieldError, DeepMap, useFormContext } from 'react-hook-form';
+import { DeepMap, FieldError, useFormContext } from 'react-hook-form';
+
 import { Button, useStyles2 } from '@grafana/ui';
-import { CollapsibleSection } from '../CollapsibleSection';
-import { ActionIcon } from '../../../rules/ActionIcon';
-import { OptionField } from './OptionField';
+import { Trans, t } from 'app/core/internationalization';
 import { useControlledFieldArray } from 'app/features/alerting/unified/hooks/useControlledFieldArray';
+import { NotificationChannelOption } from 'app/types';
+
+import { ActionIcon } from '../../../rules/ActionIcon';
+import { CollapsibleSection } from '../CollapsibleSection';
+
+import { OptionField } from './OptionField';
 import { getReceiverFormFieldStyles } from './styles';
 
 interface Props {
@@ -16,7 +19,7 @@ interface Props {
   readOnly?: boolean;
 }
 
-export const SubformArrayField: FC<Props> = ({ option, pathPrefix, errors, defaultValues, readOnly = false }) => {
+export const SubformArrayField = ({ option, pathPrefix, errors, defaultValues, readOnly = false }: Props) => {
   const styles = useStyles2(getReceiverFormFieldStyles);
   const path = `${pathPrefix}${option.propertyName}`;
   const formAPI = useFormContext();
@@ -36,7 +39,7 @@ export const SubformArrayField: FC<Props> = ({ option, pathPrefix, errors, defau
                 <ActionIcon
                   data-testid={`${path}.${itemIndex}.delete-button`}
                   icon="trash-alt"
-                  tooltip="delete"
+                  tooltip={t('alerting.subform-array-field.tooltip-delete', 'delete')}
                   onClick={() => remove(itemIndex)}
                   className={styles.deleteIcon}
                 />
@@ -64,7 +67,7 @@ export const SubformArrayField: FC<Props> = ({ option, pathPrefix, errors, defau
             size="sm"
             onClick={() => append({ __id: String(Math.random()) })}
           >
-            Add
+            <Trans i18nKey="alerting.subform-array-field.add">Add</Trans>
           </Button>
         )}
       </CollapsibleSection>

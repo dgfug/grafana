@@ -57,8 +57,8 @@ func isValid(name string, table table) bool {
 	}
 
 	for i, r := range name {
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			if !unicode.In(r, table.First) {
 				return false
 			}
@@ -83,8 +83,8 @@ func sanitize(name string, table table) (string, bool) {
 	var b strings.Builder
 
 	for i, r := range name {
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			if unicode.In(r, table.First) {
 				b.WriteRune(r)
 			}
@@ -120,7 +120,7 @@ func sanitizeLabelName(name string) (string, bool) {
 }
 
 // sampleValue converts a field value into a value suitable for a simple sample value.
-func sampleValue(value interface{}) (float64, bool) {
+func sampleValue(value any) (float64, bool) {
 	switch v := value.(type) {
 	case float64:
 		return v, true

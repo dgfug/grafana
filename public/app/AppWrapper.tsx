@@ -1,31 +1,43 @@
-import React, { ComponentType } from 'react';
-import { Router, Route, Redirect, Switch } from 'react-router-dom';
-import { config, locationService, navigationLogger } from '@grafana/runtime';
+import { Action, KBarProvider } from 'kbar';
+import { Component, ComponentType, Fragment, ReactNode } from 'react';
+import CacheProvider from 'react-inlinesvg/provider';
 import { Provider } from 'react-redux';
-import { store } from 'app/store/store';
-import { ErrorBoundaryAlert, GlobalStyles, ModalRoot, ModalsProvider } from '@grafana/ui';
-import { GrafanaApp } from './app';
+import { Route, Routes } from 'react-router-dom-v5-compat';
+
+import { config, navigationLogger, reportInteraction } from '@grafana/runtime';
+import { ErrorBoundaryAlert, PortalContainer, TimeRangeProvider } from '@grafana/ui';
 import { getAppRoutes } from 'app/routes/routes';
-import { ConfigContext, ThemeProvider } from './core/utils/ConfigProvider';
+import { store } from 'app/store/store';
+
+import { GrafanaApp } from './app';
+import { ExtensionSidebarContextProvider } from './core/components/AppChrome/ExtensionSidebar/ExtensionSidebarProvider';
+import { GlobalStylesWrapper } from './core/components/AppChrome/ExtensionSidebar/GlobalStylesWrapper';
+import { GrafanaContext } from './core/context/GrafanaContext';
+import { GrafanaRouteWrapper } from './core/navigation/GrafanaRoute';
 import { RouteDescriptor } from './core/navigation/types';
-import { contextSrv } from './core/services/context_srv';
-import { NavBar } from './core/components/NavBar/NavBar';
-import { GrafanaRoute } from './core/navigation/GrafanaRoute';
-import { AppNotificationList } from './core/components/AppNotifications/AppNotificationList';
-import { SearchWrapper } from 'app/features/search';
+import { ThemeProvider } from './core/utils/ConfigProvider';
 import { LiveConnectionWarning } from './features/live/LiveConnectionWarning';
+import { ExtensionRegistriesProvider } from './features/plugins/extensions/ExtensionRegistriesContext';
+import { pluginExtensionRegistries } from './features/plugins/extensions/registry/setup';
+import { ScopesContextProvider } from './features/scopes/ScopesContextProvider';
+import { RouterWrapper } from './routes/RoutesWrapper';
 
 interface AppWrapperProps {
   app: GrafanaApp;
 }
 
 interface AppWrapperState {
-  ngInjector: any;
+  ready?: boolean;
 }
 
 /** Used by enterprise */
 let bodyRenderHooks: ComponentType[] = [];
 let pageBanners: ComponentType[] = [];
+const enterpriseProviders: Array<ComponentType<{ children: ReactNode }>> = [];
+
+export function addEnterpriseProviders(provider: ComponentType<{ children: ReactNode }>) {
+  enterpriseProviders.push(provider);
+}
 
 export function addBodyRenderHook(fn: ComponentType) {
   bodyRenderHooks.push(fn);
@@ -34,97 +46,96 @@ export function addBodyRenderHook(fn: ComponentType) {
 export function addPageBanner(fn: ComponentType) {
   pageBanners.push(fn);
 }
-export class AppWrapper extends React.Component<AppWrapperProps, AppWrapperState> {
-  container = React.createRef<HTMLDivElement>();
+
+export class AppWrapper extends Component<AppWrapperProps, AppWrapperState> {
+  private iconCacheID = `grafana-icon-cache-${config.buildInfo.commit}`;
 
   constructor(props: AppWrapperProps) {
     super(props);
-
-    this.state = {
-      ngInjector: null,
-    };
+    this.state = {};
   }
 
-  componentDidMount() {
-    if (this.container) {
-      this.bootstrapNgApp();
-    } else {
-      throw new Error('Failed to boot angular app, no container to attach to');
+  async componentDidMount() {
+    this.setState({ ready: true });
+    $('.preloader').remove();
+
+    // clear any old icon caches
+    const cacheKeys = await window.caches.keys();
+    for (const key of cacheKeys) {
+      if (key.startsWith('grafana-icon-cache') && key !== this.iconCacheID) {
+        window.caches.delete(key);
+      }
     }
   }
 
-  bootstrapNgApp() {
-    const injector = this.props.app.angularApp.bootstrap();
-    this.setState({ ngInjector: injector });
-  }
-
   renderRoute = (route: RouteDescriptor) => {
-    const roles = route.roles ? route.roles() : [];
-
     return (
       <Route
-        exact={route.exact === undefined ? true : route.exact}
+        caseSensitive={route.sensitive === undefined ? false : route.sensitive}
         path={route.path}
         key={route.path}
-        render={(props) => {
-          navigationLogger('AppWrapper', false, 'Rendering route', route, 'with match', props.location);
-          // TODO[Router]: test this logic
-          if (roles?.length) {
-            if (!roles.some((r: string) => contextSrv.hasRole(r))) {
-              return <Redirect to="/" />;
-            }
-          }
-
-          return <GrafanaRoute {...props} route={route} />;
-        }}
+        element={<GrafanaRouteWrapper route={route} />}
       />
     );
   };
 
   renderRoutes() {
-    return <Switch>{getAppRoutes().map((r) => this.renderRoute(r))}</Switch>;
+    return <Routes>{getAppRoutes().map((r) => this.renderRoute(r))}</Routes>;
   }
 
   render() {
+    const { app } = this.props;
+    const { ready } = this.state;
+
     navigationLogger('AppWrapper', false, 'rendering');
 
-    // @ts-ignore
-    const appSeed = `<grafana-app ng-cloak></app-notifications-list><div id="ngRoot"></div></grafana-app>`;
+    const commandPaletteActionSelected = (action: Action) => {
+      reportInteraction('command_palette_action_selected', {
+        actionId: action.id,
+        actionName: action.name,
+      });
+    };
+
+    const routerWrapperProps = {
+      routes: ready && this.renderRoutes(),
+      pageBanners,
+      bodyRenderHooks,
+      providers: enterpriseProviders,
+    };
+
+    const MaybeTimeRangeProvider = config.featureToggles.timeRangeProvider ? TimeRangeProvider : Fragment;
+    const MaybeExtensionSidebarProvider = config.featureToggles.extensionSidebar
+      ? ExtensionSidebarContextProvider
+      : Fragment;
 
     return (
       <Provider store={store}>
         <ErrorBoundaryAlert style="page">
-          <ConfigContext.Provider value={config}>
-            <ThemeProvider>
-              <ModalsProvider>
-                <GlobalStyles />
-                <div className="grafana-app">
-                  <Router history={locationService.getHistory()}>
-                    <NavBar />
-                    <main className="main-view">
-                      {pageBanners.map((Banner, index) => (
-                        <Banner key={index.toString()} />
-                      ))}
-                      <div
-                        ref={this.container}
-                        dangerouslySetInnerHTML={{
-                          __html: appSeed,
-                        }}
-                      />
-                      <AppNotificationList />
-                      <SearchWrapper />
-                      {this.state.ngInjector && this.container && this.renderRoutes()}
-                      {bodyRenderHooks.map((Hook, index) => (
-                        <Hook key={index.toString()} />
-                      ))}
-                    </main>
-                  </Router>
-                </div>
-                <LiveConnectionWarning />
-                <ModalRoot />
-              </ModalsProvider>
+          <GrafanaContext.Provider value={app.context}>
+            <ThemeProvider value={config.theme2}>
+              <CacheProvider name={this.iconCacheID}>
+                <KBarProvider
+                  actions={[]}
+                  options={{ enableHistory: true, callbacks: { onSelectAction: commandPaletteActionSelected } }}
+                >
+                  <MaybeTimeRangeProvider>
+                    <ScopesContextProvider>
+                      <ExtensionRegistriesProvider registries={pluginExtensionRegistries}>
+                        <MaybeExtensionSidebarProvider>
+                          <GlobalStylesWrapper />
+                          <div className="grafana-app">
+                            <RouterWrapper {...routerWrapperProps} />
+                            <LiveConnectionWarning />
+                            <PortalContainer />
+                          </div>
+                        </MaybeExtensionSidebarProvider>
+                      </ExtensionRegistriesProvider>
+                    </ScopesContextProvider>
+                  </MaybeTimeRangeProvider>
+                </KBarProvider>
+              </CacheProvider>
             </ThemeProvider>
-          </ConfigContext.Provider>
+          </GrafanaContext.Provider>
         </ErrorBoundaryAlert>
       </Provider>
     );

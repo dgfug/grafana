@@ -2,7 +2,6 @@
   "type": "panel",
   "name": "Bar chart",
   "id": "barchart",
-  "state": "beta",
 
   "info": {
     "description": "Categorical charts with group support",
@@ -13,6 +12,13 @@
     "logos": {
       "small": "img/barchart.svg",
       "large": "img/barchart.svg"
-    }
+    },
+    "links": [
+      { "name": "Raise issue", "url": "https://github.com/grafana/grafana/issues/new" },
+      {
+        "name": "Documentation",
+        "url": "https://grafana.com/docs/grafana/latest/panels-visualizations/visualizations/bar-chart/"
+      }
+    ]
   }
 }

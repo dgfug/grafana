@@ -1,24 +1,30 @@
 import {
   FieldConfigEditorBuilder,
-  FieldOverrideEditorProps,
+  StandardEditorProps,
   FieldType,
   identityOverrideProcessor,
+  SelectableValue,
 } from '@grafana/data';
-import React from 'react';
-import { graphFieldOptions, HorizontalGroup, IconButton, Input, RadioButtonGroup, Tooltip } from '../..';
-import { StackingConfig, StackingMode } from '@grafana/schema';
+import { GraphFieldConfig, StackingConfig, StackingMode } from '@grafana/schema';
 
-export const StackingEditor: React.FC<FieldOverrideEditorProps<StackingConfig, any>> = ({
+import { RadioButtonGroup } from '../../components/Forms/RadioButtonGroup/RadioButtonGroup';
+import { IconButton } from '../../components/IconButton/IconButton';
+import { Input } from '../../components/Input/Input';
+import { Stack } from '../../components/Layout/Stack/Stack';
+import { graphFieldOptions } from '../../components/uPlot/config';
+import { t } from '../../utils/i18n';
+
+export const StackingEditor = ({
   value,
   context,
   onChange,
   item,
-}) => {
+}: StandardEditorProps<StackingConfig, { options: Array<SelectableValue<StackingMode>> }>) => {
   return (
-    <HorizontalGroup>
+    <Stack>
       <RadioButtonGroup
         value={value?.mode || StackingMode.None}
-        options={item.settings.options}
+        options={item.settings?.options ?? []}
         onChange={(v) => {
           onChange({
             ...value,
@@ -29,11 +35,13 @@ export const StackingEditor: React.FC<FieldOverrideEditorProps<StackingConfig, a
       {context.isOverride && value?.mode && value?.mode !== StackingMode.None && (
         <Input
           type="text"
-          placeholder="Group"
+          placeholder={t('grafana-ui.stacking-builder.group', 'Group')}
           suffix={
-            <Tooltip content="Name of the stacking group" placement="top">
-              <IconButton name="question-circle" />
-            </Tooltip>
+            <IconButton
+              name="question-circle"
+              tooltip={t('grafana-ui.stacking-builder.group-tooltip', 'Name of the stacking group')}
+              tooltipPlacement="top"
+            />
           }
           defaultValue={value?.group}
           onChange={(v) => {
@@ -44,12 +52,12 @@ export const StackingEditor: React.FC<FieldOverrideEditorProps<StackingConfig, a
           }}
         />
       )}
-    </HorizontalGroup>
+    </Stack>
   );
 };
 
 export function addStackingConfig(
-  builder: FieldConfigEditorBuilder<{ stacking: StackingConfig }>,
+  builder: FieldConfigEditorBuilder<GraphFieldConfig>,
   defaultConfig?: StackingConfig,
   category = ['Graph styles']
 ) {

@@ -1,8 +1,9 @@
-import React from 'react';
 import { render, screen } from '@testing-library/react';
+
+import { Combobox } from '../Combobox/Combobox';
 import { Input } from '../Input/Input';
+
 import { Field } from './Field';
-import { Select } from '../Select/Select';
 
 describe('Field', () => {
   it('renders the label', () => {
@@ -26,9 +27,13 @@ describe('Field', () => {
   });
 
   it('renders with the inputId of its children', () => {
+    const comboboxOptions = [
+      { label: 'Option 1', value: 'option-1' },
+      { label: 'Option 2', value: 'option-2' },
+    ];
     render(
       <Field label="My other label">
-        <Select menuShouldPortal inputId="my-select-input" onChange={() => {}} />
+        <Combobox id="my-select-input" options={comboboxOptions} onChange={() => {}} />
       </Field>
     );
 

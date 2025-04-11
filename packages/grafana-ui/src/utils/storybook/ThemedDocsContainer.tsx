@@ -1,30 +1,31 @@
-// This is a temporary workaround to allow theme switching storybook docs
-// see https://github.com/storybookjs/storybook/issues/10523 for further details
-import React from 'react';
-import { DocsContainer } from '@storybook/addon-docs/blocks';
-import { useDarkMode } from 'storybook-dark-mode';
-import { GrafanaLight, GrafanaDark } from '../../../.storybook/storybookTheme';
+// Wrap the DocsContainer for theme switching support.
+import { DocsContainer, DocsContextProps } from '@storybook/addon-docs';
+import * as React from 'react';
+
+import { getThemeById } from '@grafana/data';
+
+import { createStorybookTheme } from '../../../.storybook/storybookTheme';
+import { GlobalStyles } from '../../themes';
 
 type Props = {
-  context: any;
+  context: DocsContextProps;
+  children?: React.ReactNode;
 };
 
-export const ThemedDocsContainer: React.FC<Props> = ({ children, context }) => {
-  const dark = useDarkMode();
+export const ThemedDocsContainer = ({ children, context }: Props) => {
+  // Default to system theme for pages that don't have associated stories
+  // Currently this is only the case for the docs `Intro` page
+  let themeId = 'system';
+  if (context.componentStories().length > 0) {
+    const story = context.storyById();
+    const { globals } = context.getStoryContext(story);
+    themeId = globals.theme;
+  }
+  const theme = getThemeById(themeId);
 
   return (
-    <DocsContainer
-      context={{
-        ...context,
-        parameters: {
-          ...context.parameters,
-          docs: {
-            ...context.parameters.docs,
-            theme: dark ? GrafanaDark : GrafanaLight,
-          },
-        },
-      }}
-    >
+    <DocsContainer theme={createStorybookTheme(theme)} context={context}>
+      <GlobalStyles />
       {children}
     </DocsContainer>
   );
