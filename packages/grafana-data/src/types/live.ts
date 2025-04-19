@@ -12,6 +12,7 @@ export enum LiveChannelScope {
   Plugin = 'plugin', // namespace = plugin name (singleton works for apps too)
   Grafana = 'grafana', // namespace = feature
   Stream = 'stream', // namespace = id for the managed data stream
+  Watch = 'watch', // namespace = k8s group we will watch
 }
 
 /**
@@ -20,34 +21,9 @@ export enum LiveChannelScope {
  * @alpha
  */
 export enum LiveChannelType {
-  DataStream = 'stream', // each message contains a batch of rows that will be appened to previous values
+  DataStream = 'stream', // each message contains a batch of rows that will be appended to previous values
   DataFrame = 'frame', // each message is an entire data frame and should *replace* previous content
-  JSON = 'json', // arbitray json message
-}
-
-/**
- * @alpha -- experimental
- */
-export interface LiveChannelConfig {
-  /**
-   * An optional description for the channel
-   */
-  description?: string;
-
-  /**
-   * What kind of data do you expect
-   */
-  type?: LiveChannelType;
-
-  /**
-   * The channel keeps track of who else is connected to the same channel
-   */
-  hasPresence?: boolean;
-
-  /**
-   * Allow users to write to the connection
-   */
-  canPublish?: boolean;
+  JSON = 'json', // arbitrary json message
 }
 
 export enum LiveChannelConnectionState {
@@ -55,11 +31,13 @@ export enum LiveChannelConnectionState {
   Pending = 'pending',
   /** Connected to the channel */
   Connected = 'connected',
+  /** Connecting to a channel */
+  Connecting = 'connecting',
   /** Disconnected from the channel.  The channel will reconnect when possible */
   Disconnected = 'disconnected',
   /** Was at some point connected, and will not try to reconnect */
   Shutdown = 'shutdown',
-  /** Channel configuraiton was invalid and will not connect */
+  /** Channel configuration was invalid and will not connect */
   Invalid = 'invalid',
 }
 
@@ -153,10 +131,22 @@ export interface LiveChannelPresenceStatus {
 /**
  * @alpha -- experimental
  */
+export type LiveChannelId = string;
+
+/**
+ * @alpha -- experimental
+ */
 export interface LiveChannelAddress {
   scope: LiveChannelScope;
   namespace: string; // depends on the scope
   path: string;
+
+  /**
+   * Additional metadata passed to a channel.  The backend will propagate this JSON object to
+   * each OnSubscribe and RunStream calls.  This value should be constant across multiple requests
+   * to the same channel path
+   */
+  data?: any;
 }
 
 /**
@@ -192,11 +182,11 @@ export function isValidLiveChannelAddress(addr?: LiveChannelAddress): addr is Li
  *
  * @alpha -- experimental
  */
-export function toLiveChannelId(addr: LiveChannelAddress): string {
+export function toLiveChannelId(addr: LiveChannelAddress): LiveChannelId {
   if (!addr.scope) {
     return '';
   }
-  let id = addr.scope as string;
+  let id: string = addr.scope;
   if (!addr.namespace) {
     return id;
   }
@@ -205,14 +195,4 @@ export function toLiveChannelId(addr: LiveChannelAddress): string {
     return id;
   }
   return id + '/' + addr.path;
-}
-
-/**
- * @alpha -- experimental
- */
-export interface LiveChannelSupport {
-  /**
-   * Get the channel handler for the path, or throw an error if invalid
-   */
-  getChannelConfig(path: string): LiveChannelConfig | undefined;
 }

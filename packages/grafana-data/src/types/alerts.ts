@@ -1,5 +1,5 @@
 /**
- * @internal -- might be replaced by next generation Alerting
+ * @internal
  */
 export enum AlertState {
   NoData = 'no_data',
@@ -7,16 +7,16 @@ export enum AlertState {
   Alerting = 'alerting',
   OK = 'ok',
   Pending = 'pending',
+  Recovering = 'recovering',
   Unknown = 'unknown',
 }
 
 /**
- * @internal -- might be replaced by next generation Alerting
+ * @internal
  */
 export interface AlertStateInfo {
   id: number;
   dashboardId: number;
   panelId: number;
   state: AlertState;
-  newStateDate: string;
 }
