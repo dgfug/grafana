@@ -1,15 +1,29 @@
-import { CombinedRule, Rule, RuleIdentifier, RuleWithLocation } from 'app/types/unified-alerting';
-import { Annotations, Labels, RulerRuleDTO } from 'app/types/unified-alerting-dto';
+import { nth } from 'lodash';
+
+import { locationService } from '@grafana/runtime';
+import {
+  CloudRuleIdentifier,
+  CombinedRule,
+  EditableRuleIdentifier,
+  Rule,
+  RuleGroupIdentifier,
+  RuleGroupIdentifierV2,
+  RuleIdentifier,
+  RuleWithLocation,
+} from 'app/types/unified-alerting';
+import { Annotations, Labels, PromRuleType, RulerCloudRuleDTO, RulerRuleDTO } from 'app/types/unified-alerting-dto';
+
+import { logError } from '../Analytics';
+import { shouldUsePrometheusRulesPrimary } from '../featureToggles';
+
 import { GRAFANA_RULES_SOURCE_NAME } from './datasource';
 import {
-  isAlertingRule,
-  isAlertingRulerRule,
+  getRuleName,
   isCloudRuleIdentifier,
   isGrafanaRuleIdentifier,
-  isGrafanaRulerRule,
   isPrometheusRuleIdentifier,
-  isRecordingRule,
-  isRecordingRulerRule,
+  prometheusRuleType,
+  rulerRuleType,
 } from './rules';
 
 export function fromRulerRule(
@@ -17,16 +31,40 @@ export function fromRulerRule(
   namespace: string,
   groupName: string,
   rule: RulerRuleDTO
-): RuleIdentifier {
-  if (isGrafanaRulerRule(rule)) {
-    return { uid: rule.grafana_alert.uid! };
+): EditableRuleIdentifier {
+  if (rulerRuleType.grafana.rule(rule)) {
+    return { uid: rule.grafana_alert.uid!, ruleSourceName: 'grafana' };
   }
   return {
     ruleSourceName,
     namespace,
     groupName,
+    ruleName: getRuleName(rule),
     rulerRuleHash: hashRulerRule(rule),
-  };
+  } satisfies CloudRuleIdentifier;
+}
+
+export function fromRulerRuleAndGroupIdentifierV2(
+  ruleGroup: RuleGroupIdentifierV2,
+  rule: RulerRuleDTO
+): EditableRuleIdentifier {
+  if (ruleGroup.groupOrigin === 'grafana') {
+    if (rulerRuleType.grafana.rule(rule)) {
+      return { uid: rule.grafana_alert.uid, ruleSourceName: 'grafana' };
+    }
+    logError(new Error('Rule is not a Grafana Ruler rule'));
+    throw new Error('Rule is not a Grafana Ruler rule');
+  }
+
+  return fromRulerRule(ruleGroup.rulesSource.name, ruleGroup.namespace.name, ruleGroup.groupName, rule);
+}
+
+export function fromRulerRuleAndRuleGroupIdentifier(
+  ruleGroup: RuleGroupIdentifier,
+  rule: RulerRuleDTO
+): EditableRuleIdentifier {
+  const { dataSourceName, namespaceName, groupName } = ruleGroup;
+  return fromRulerRule(dataSourceName, namespaceName, groupName, rule);
 }
 
 export function fromRule(ruleSourceName: string, namespace: string, groupName: string, rule: Rule): RuleIdentifier {
@@ -34,6 +72,7 @@ export function fromRule(ruleSourceName: string, namespace: string, groupName: s
     ruleSourceName,
     namespace,
     groupName,
+    ruleName: rule.name,
     ruleHash: hashRule(rule),
   };
 }
@@ -66,6 +105,7 @@ export function equal(a: RuleIdentifier, b: RuleIdentifier) {
     return (
       a.groupName === b.groupName &&
       a.namespace === b.namespace &&
+      a.ruleName === b.ruleName &&
       a.rulerRuleHash === b.rulerRuleHash &&
       a.ruleSourceName === b.ruleSourceName
     );
@@ -75,7 +115,30 @@ export function equal(a: RuleIdentifier, b: RuleIdentifier) {
     return (
       a.groupName === b.groupName &&
       a.namespace === b.namespace &&
+      a.ruleName === b.ruleName &&
       a.ruleHash === b.ruleHash &&
+      a.ruleSourceName === b.ruleSourceName
+    );
+  }
+
+  // It might happen to compare Cloud and Prometheus identifiers for datasources with available Ruler API
+  // It happends when the Ruler API timeouts and the UI cannot create Cloud identifiers, so it creates a Prometheus identifier instead.
+  if (isCloudRuleIdentifier(a) && isPrometheusRuleIdentifier(b)) {
+    return (
+      a.groupName === b.groupName &&
+      a.namespace === b.namespace &&
+      a.ruleName === b.ruleName &&
+      a.rulerRuleHash === b.ruleHash &&
+      a.ruleSourceName === b.ruleSourceName
+    );
+  }
+
+  if (isPrometheusRuleIdentifier(a) && isCloudRuleIdentifier(b)) {
+    return (
+      a.groupName === b.groupName &&
+      a.namespace === b.namespace &&
+      a.ruleName === b.ruleName &&
+      a.ruleHash === b.rulerRuleHash &&
       a.ruleSourceName === b.ruleSourceName
     );
   }
@@ -90,8 +153,23 @@ function escapeDollars(value: string): string {
   return value.replace(/\$/g, '_DOLLAR_');
 }
 
-function unesacapeDollars(value: string): string {
+function unescapeDollars(value: string): string {
   return value.replace(/\_DOLLAR\_/g, '$');
+}
+
+/**
+ * deal with Unix-style path separators "/" (replaced with \x1f – unit separator)
+ * and Windows-style path separators "\" (replaced with \x1e – record separator)
+ * we need this to side-step proxies that automatically decode %2F to prevent path traversal attacks
+ * we'll use some non-printable characters from the ASCII table that will get encoded properly but very unlikely
+ * to ever be used in a rule name or namespace
+ */
+export function escapePathSeparators(value: string): string {
+  return value.replace(/\//g, '\x1f').replace(/\\/g, '\x1e');
+}
+
+export function unescapePathSeparators(value: string): string {
+  return value.replace(/\x1f/g, '/').replace(/\x1e/g, '\\');
 }
 
 export function parse(value: string, decodeFromUri = false): RuleIdentifier {
@@ -99,18 +177,20 @@ export function parse(value: string, decodeFromUri = false): RuleIdentifier {
   const parts = source.split('$');
 
   if (parts.length === 1) {
-    return { uid: value };
+    return { uid: value, ruleSourceName: 'grafana' };
   }
 
-  if (parts.length === 5) {
-    const [prefix, ruleSourceName, namespace, groupName, hash] = parts.map(unesacapeDollars);
+  if (parts.length === 6) {
+    const [prefix, ruleSourceName, namespace, groupName, ruleName, hash] = parts
+      .map(unescapeDollars)
+      .map(unescapePathSeparators);
 
     if (prefix === cloudRuleIdentifierPrefix) {
-      return { ruleSourceName, namespace, groupName, rulerRuleHash: Number(hash) };
+      return { ruleSourceName, namespace, groupName, ruleName, rulerRuleHash: hash };
     }
 
     if (prefix === prometheusRuleIdentifierPrefix) {
-      return { ruleSourceName, namespace, groupName, ruleHash: Number(hash) };
+      return { ruleSourceName, namespace, groupName, ruleName, ruleHash: hash };
     }
   }
 
@@ -140,10 +220,12 @@ export function stringifyIdentifier(identifier: RuleIdentifier): string {
       identifier.ruleSourceName,
       identifier.namespace,
       identifier.groupName,
+      identifier.ruleName,
       identifier.rulerRuleHash,
     ]
       .map(String)
       .map(escapeDollars)
+      .map(escapePathSeparators)
       .join('$');
   }
 
@@ -152,67 +234,107 @@ export function stringifyIdentifier(identifier: RuleIdentifier): string {
     identifier.ruleSourceName,
     identifier.namespace,
     identifier.groupName,
+    identifier.ruleName,
     identifier.ruleHash,
   ]
     .map(String)
     .map(escapeDollars)
+    .map(escapePathSeparators)
     .join('$');
 }
 
-function hash(value: string): number {
+export function hash(value: string): number {
   let hash = 0;
   if (value.length === 0) {
     return hash;
   }
-  for (var i = 0; i < value.length; i++) {
-    var char = value.charCodeAt(i);
+  for (let i = 0; i < value.length; i++) {
+    const char = value.charCodeAt(i);
     hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32bit integer
   }
   return hash;
 }
 
-// this is used to identify lotex rules, as they do not have a unique identifier
-function hashRulerRule(rule: RulerRuleDTO): number {
-  if (isRecordingRulerRule(rule)) {
-    return hash(JSON.stringify([rule.record, rule.expr, hashLabelsOrAnnotations(rule.labels)]));
-  } else if (isAlertingRulerRule(rule)) {
-    return hash(
-      JSON.stringify([
-        rule.alert,
-        rule.expr,
-        hashLabelsOrAnnotations(rule.annotations),
-        hashLabelsOrAnnotations(rule.labels),
-      ])
-    );
-  } else {
-    throw new Error('only recording and alerting ruler rules can be hashed');
+// this is used to identify rules, mimir / loki rules do not have a unique identifier
+export function hashRulerRule(rule: RulerRuleDTO): string {
+  if (rulerRuleType.grafana.rule(rule)) {
+    return rule.grafana_alert.uid;
   }
+
+  const prometheusRulesPrimary = shouldUsePrometheusRulesPrimary();
+  // If the prometheusRulesPrimary feature toggle is enabled, we don't need to hash the query
+  // We need to make fingerprint compatibility between Prometheus and Ruler rules
+  // Query often differs between the two, so we can't use it to generate a fingerprint
+  const includeQuery = !prometheusRulesPrimary;
+  const fingerprint = getRulerRuleFingerprint(rule, includeQuery);
+  return hash(JSON.stringify(fingerprint)).toString();
 }
 
-function hashRule(rule: Rule): number {
-  if (isRecordingRule(rule)) {
-    return hash(JSON.stringify([rule.type, rule.query, hashLabelsOrAnnotations(rule.labels)]));
-  }
+export function getRulerRuleFingerprint(rule: RulerCloudRuleDTO, includeQuery: boolean) {
+  const queryHash = includeQuery ? hashQuery(rule.expr) : '';
+  const labelsHash = hashLabelsOrAnnotations(rule.labels);
 
-  if (isAlertingRule(rule)) {
-    return hash(
-      JSON.stringify([
-        rule.type,
-        rule.query,
-        hashLabelsOrAnnotations(rule.annotations),
-        hashLabelsOrAnnotations(rule.labels),
-      ])
-    );
+  if (rulerRuleType.dataSource.recordingRule(rule)) {
+    return [rule.record, PromRuleType.Recording, queryHash, labelsHash];
   }
-
-  throw new Error('only recording and alerting rules can be hashed');
+  if (rulerRuleType.dataSource.alertingRule(rule)) {
+    return [rule.alert, PromRuleType.Alerting, queryHash, hashLabelsOrAnnotations(rule.annotations), labelsHash];
+  }
+  throw new Error('Only recording and alerting ruler rules can be hashed');
 }
 
-function hashLabelsOrAnnotations(item: Labels | Annotations | undefined): string {
+export function hashRule(rule: Rule): string {
+  const prometheusRulesPrimary = shouldUsePrometheusRulesPrimary();
+  const includeQuery = !prometheusRulesPrimary;
+
+  const fingerprint = getPromRuleFingerprint(rule, includeQuery);
+  return hash(JSON.stringify(fingerprint)).toString();
+}
+
+export function getPromRuleFingerprint(rule: Rule, includeQuery: boolean) {
+  const queryHash = includeQuery ? hashQuery(rule.query) : '';
+  const labelsHash = hashLabelsOrAnnotations(rule.labels);
+
+  if (prometheusRuleType.recordingRule(rule)) {
+    return [rule.name, PromRuleType.Recording, queryHash, labelsHash];
+  }
+  if (prometheusRuleType.alertingRule(rule)) {
+    return [rule.name, PromRuleType.Alerting, queryHash, hashLabelsOrAnnotations(rule.annotations), labelsHash];
+  }
+  throw new Error('Only recording and alerting rules can be hashed');
+}
+
+// there can be slight differences in how prom & ruler render a query, this will hash them accounting for the differences
+export function hashQuery(query: string) {
+  // one of them might be wrapped in parens
+  if (query.length > 1 && query[0] === '(' && query[query.length - 1] === ')') {
+    query = query.slice(1, -1);
+  }
+  // whitespace could be added or removed
+  query = query.replace(/\s|\n/g, '');
+  // labels matchers can be reordered, so sort the enitre string, esentially comparing just the character counts
+  return query.split('').sort().join('');
+}
+
+export function hashLabelsOrAnnotations(item: Labels | Annotations | undefined): string {
   return JSON.stringify(Object.entries(item || {}).sort((a, b) => a[0].localeCompare(b[0])));
 }
 
 export function ruleIdentifierToRuleSourceName(identifier: RuleIdentifier): string {
   return isGrafanaRuleIdentifier(identifier) ? GRAFANA_RULES_SOURCE_NAME : identifier.ruleSourceName;
+}
+
+// DO NOT USE REACT-ROUTER HOOKS FOR THIS CODE
+// React-router's useLocation/useParams/props.match are broken and don't preserve original param values when parsing location
+// so, they cannot be used to parse name and sourceName path params
+// React-router messes the pathname up resulting in a string that is neither encoded nor decoded
+// Relevant issue: https://github.com/remix-run/history/issues/505#issuecomment-453175833
+// It was probably fixed in React-Router v6
+type PathWithOptionalID = { id?: string };
+export function getRuleIdFromPathname(params: PathWithOptionalID): string | undefined {
+  const { pathname = '' } = locationService.getLocation();
+  const { id } = params;
+
+  return id ? nth(pathname.split('/'), -2) : undefined;
 }

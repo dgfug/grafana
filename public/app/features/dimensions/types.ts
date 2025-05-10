@@ -1,9 +1,5 @@
-import { Field } from '@grafana/data';
-
-export interface BaseDimensionConfig<T = any> {
-  fixed: T;
-  field?: string;
-}
+import { Field, FieldType } from '@grafana/data';
+import { TextDimensionConfig, TextDimensionMode } from '@grafana/schema';
 
 export interface DimensionSupplier<T = any> {
   /**
@@ -12,7 +8,7 @@ export interface DimensionSupplier<T = any> {
   isAssumed?: boolean;
 
   /**
-   * The fied used for
+   * The field used for
    */
   field?: Field;
 
@@ -32,55 +28,60 @@ export interface DimensionSupplier<T = any> {
   get: (index: number) => T;
 }
 
-export enum ScaleDimensionMode {
-  Linear = 'linear',
-  Quadratic = 'quad',
-}
-
-/** This will map the field value% to a scaled value within the range */
-export interface ScaleDimensionConfig extends BaseDimensionConfig<number> {
-  min: number;
-  max: number;
-}
-
 /** Places that use the value */
 export interface ScaleDimensionOptions {
   min: number;
   max: number;
   step?: number;
   hideRange?: boolean; // false
+  filteredFieldType?: FieldType;
+}
+
+export interface ScalarDimensionOptions {
+  min: number;
+  max: number;
 }
 
 export interface TextDimensionOptions {
   // anything?
 }
 
-export enum TextDimensionMode {
-  Fixed = 'fixed',
-  Field = 'field',
-  Template = 'template',
-}
-
-export interface TextDimensionConfig extends BaseDimensionConfig<string> {
-  mode: TextDimensionMode;
-}
-
-/** Use the color value from field configs */
-export interface ColorDimensionConfig extends BaseDimensionConfig<string> {}
+export const defaultTextConfig: TextDimensionConfig = Object.freeze({
+  fixed: '',
+  mode: TextDimensionMode.Field,
+  field: '',
+});
 
 /** Places that use the value */
 export interface ResourceDimensionOptions {
-  resourceType: 'icon' | 'image';
+  resourceType: MediaType;
+  folderName?: ResourceFolderName;
+  placeholderText?: string;
+  placeholderValue?: string;
+  // If you want your icon to be driven by value of a field
+  showSourceRadio?: boolean;
+  maxFiles?: number;
 }
 
-export enum ResourceDimensionMode {
-  Fixed = 'fixed',
-  Field = 'field',
-  Mapping = 'mapping',
-  // pattern? uses field in the pattern
+export enum ResourceFolderName {
+  Icon = 'img/icons/unicons',
+  IOT = 'img/icons/iot',
+  Marker = 'img/icons/marker',
+  BG = 'img/bg',
 }
 
-/** Get the path to a resource (URL) */
-export interface ResourceDimensionConfig extends BaseDimensionConfig<string> {
-  mode: ResourceDimensionMode;
+export enum MediaType {
+  Icon = 'icon',
+  Image = 'image',
+}
+
+export enum PickerTabType {
+  Folder = 'folder',
+  URL = 'url',
+  Upload = 'upload',
+}
+
+export enum ResourcePickerSize {
+  SMALL = 'small',
+  NORMAL = 'normal',
 }

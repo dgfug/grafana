@@ -77,6 +77,8 @@ func (t NodeType) String() string {
 		return "NodeString"
 	case NodeNumber:
 		return "NodeNumber"
+	case NodeVar:
+		return "NodeVar"
 	default:
 		return "NodeUnknown"
 	}
@@ -174,7 +176,7 @@ func (f *FuncNode) Check(t *Tree) error {
 		// 	argType = TypeNumberSet
 		// }
 		if funcType == TypeVariantSet {
-			if !(argType == TypeNumberSet || argType == TypeSeriesSet || argType == TypeScalar) {
+			if argType != TypeNumberSet && argType != TypeSeriesSet && argType != TypeScalar {
 				return fmt.Errorf("parse: expected %v or %v for argument %v, got %v", TypeNumberSet, TypeSeriesSet, i, argType)
 			}
 		} else if funcType != argType {
@@ -401,6 +403,10 @@ const (
 	TypeSeriesSet
 	// TypeVariantSet is a collection of the same type Number, Series, or Scalar.
 	TypeVariantSet
+	// TypeNoData is a no data response without a known data type.
+	TypeNoData
+	// TypeTableData is a tabular data response.
+	TypeTableData
 )
 
 // String returns a string representation of the ReturnType.
@@ -416,6 +422,10 @@ func (f ReturnType) String() string {
 		return "scalar"
 	case TypeVariantSet:
 		return "variant"
+	case TypeNoData:
+		return "noData"
+	case TypeTableData:
+		return "tableData"
 	default:
 		return "unknown"
 	}

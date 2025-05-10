@@ -1,25 +1,37 @@
-import { DashboardPickerItem } from 'app/core/components/editors/DashboardPickerByID';
 import { useCallback, useState } from 'react';
+import { useAsync } from 'react-use';
 
-import { PlaylistItem } from './types';
+import { DashboardPickerDTO } from 'app/core/components/Select/DashboardPicker';
 
-export function usePlaylistItems(playlistItems?: PlaylistItem[]) {
-  const [items, setItems] = useState<PlaylistItem[]>(playlistItems ?? []);
+import { PlaylistItemUI } from './types';
+import { loadDashboards } from './utils';
 
-  const addById = useCallback(
-    (dashboard: DashboardPickerItem) => {
-      if (!dashboard || items.find((item) => item.id === dashboard.id)) {
+export function usePlaylistItems(playlistItems?: PlaylistItemUI[]) {
+  const [items, setItems] = useState<PlaylistItemUI[]>(playlistItems ?? []);
+
+  // Attach dashboards if any were missing
+  useAsync(async () => {
+    for (const item of items) {
+      if (!item.dashboards) {
+        setItems(await loadDashboards(items));
+        return;
+      }
+    }
+  }, [items]);
+
+  const addByUID = useCallback(
+    (dashboard?: DashboardPickerDTO) => {
+      if (!dashboard) {
         return;
       }
 
-      const newItem: PlaylistItem = {
-        id: dashboard.id,
-        title: dashboard.label,
-        type: 'dashboard_by_id',
-        value: dashboard.id.toString(10),
-        order: items.length + 1,
-      };
-      setItems([...items, newItem]);
+      setItems([
+        ...items,
+        {
+          type: 'dashboard_by_uid',
+          value: dashboard.uid,
+        },
+      ]);
     },
     [items]
   );
@@ -31,52 +43,36 @@ export function usePlaylistItems(playlistItems?: PlaylistItem[]) {
         return;
       }
 
-      const newItem: PlaylistItem = {
-        title: tag,
+      const newItem: PlaylistItemUI = {
         type: 'dashboard_by_tag',
         value: tag,
-        order: items.length + 1,
       };
       setItems([...items, newItem]);
     },
     [items]
   );
 
-  const movePlaylistItem = useCallback(
-    (item: PlaylistItem, offset: number) => {
-      const newItems = [...items];
-      const currentPosition = newItems.indexOf(item);
-      const newPosition = currentPosition + offset;
-
-      if (newPosition >= 0 && newPosition < newItems.length) {
-        newItems.splice(currentPosition, 1);
-        newItems.splice(newPosition, 0, item);
+  const moveItem = useCallback(
+    (src: number, dst: number) => {
+      if (src === dst || !items[src]) {
+        return; // nothing to do
       }
-      setItems(newItems);
+      const update = Array.from(items);
+      const [removed] = update.splice(src, 1);
+      update.splice(dst, 0, removed);
+      setItems(update);
     },
     [items]
-  );
-
-  const moveUp = useCallback(
-    (item: PlaylistItem) => {
-      movePlaylistItem(item, -1);
-    },
-    [movePlaylistItem]
-  );
-
-  const moveDown = useCallback(
-    (item: PlaylistItem) => {
-      movePlaylistItem(item, 1);
-    },
-    [movePlaylistItem]
   );
 
   const deleteItem = useCallback(
-    (item: PlaylistItem) => {
-      setItems(items.filter((i) => i !== item));
+    (index: number) => {
+      const copy = items.slice();
+      copy.splice(index, 1);
+      setItems(copy);
     },
     [items]
   );
 
-  return { items, addById, addByTag, deleteItem, moveDown, moveUp };
+  return { items, addByUID, addByTag, deleteItem, moveItem };
 }

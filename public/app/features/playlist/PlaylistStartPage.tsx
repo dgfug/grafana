@@ -1,12 +1,15 @@
-import { FC } from 'react';
-import { GrafanaRouteComponentProps } from '../../core/navigation/types';
+import { useParams } from 'react-router-dom-v5-compat';
+
+import { useGetPlaylistQuery } from '../../api/clients/playlist';
+
 import { playlistSrv } from './PlaylistSrv';
 
-interface Props extends GrafanaRouteComponentProps<{ id: string }> {}
-
-export const PlaylistStartPage: FC<Props> = ({ match }) => {
-  playlistSrv.start(parseInt(match.params.id, 10));
+// This is a react page that just redirects to new URLs
+export default function PlaylistStartPage() {
+  const { uid = '' } = useParams();
+  const { data, isLoading } = useGetPlaylistQuery({ name: uid });
+  if (!isLoading && data) {
+    playlistSrv.start(data);
+  }
   return null;
-};
-
-export default PlaylistStartPage;
+}

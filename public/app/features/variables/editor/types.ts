@@ -1,8 +1,12 @@
 import { VariableModel } from '../types';
 
+export enum VariableNameConstraints {
+  MaxSize = 50,
+}
+
 export interface OnPropChangeArguments<Model extends VariableModel = VariableModel> {
   propName: keyof Model;
-  propValue: any;
+  propValue: unknown;
   updateOptions?: boolean;
 }
 

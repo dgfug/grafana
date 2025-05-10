@@ -1,118 +1,173 @@
-import React, { HTMLProps } from 'react';
 import { css, cx } from '@emotion/css';
-import { GrafanaTheme2 } from '@grafana/data';
+import { HTMLProps } from 'react';
+import * as React from 'react';
+
+import { GrafanaTheme2, NavModelItem } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
 
-import { Icon } from '../Icon/Icon';
-import { IconName } from '../../types';
-import { stylesFactory, useTheme2 } from '../../themes';
-import { Counter } from './Counter';
+import { useStyles2 } from '../../themes';
 import { getFocusStyles } from '../../themes/mixins';
+import { IconName } from '../../types';
+import { clearButtonStyles } from '../Button';
+import { Icon } from '../Icon/Icon';
+import { Tooltip } from '../Tooltip/Tooltip';
 
-export interface TabProps extends HTMLProps<HTMLAnchorElement> {
+import { Counter } from './Counter';
+
+export interface TabProps extends HTMLProps<HTMLElement> {
   label: string;
   active?: boolean;
   /** When provided, it is possible to use the tab as a hyperlink. Use in cases where the tabs update location. */
   href?: string;
   icon?: IconName;
-  onChangeTab?: (event?: React.MouseEvent<HTMLAnchorElement>) => void;
+  onChangeTab?: (event: React.MouseEvent<HTMLElement>) => void;
   /** A number rendered next to the text. Usually used to display the number of items in a tab's view. */
   counter?: number | null;
+  /** Extra content, displayed after the tab label and counter */
+  suffix?: NavModelItem['tabSuffix'];
+  truncate?: boolean;
+  tooltip?: string;
 }
 
-export const Tab = React.forwardRef<HTMLAnchorElement, TabProps>(
-  ({ label, active, icon, onChangeTab, counter, className, href, ...otherProps }, ref) => {
-    const theme = useTheme2();
-    const tabsStyles = getTabStyles(theme);
+export const Tab = React.forwardRef<HTMLElement, TabProps>(
+  (
+    { label, active, icon, onChangeTab, counter, suffix: Suffix, className, href, truncate, tooltip, ...otherProps },
+    ref
+  ) => {
+    const tabsStyles = useStyles2(getStyles);
+    const clearStyles = useStyles2(clearButtonStyles);
+
     const content = () => (
       <>
-        {icon && <Icon name={icon} />}
+        {icon && <Icon name={icon} data-testid={`tab-icon-${icon}`} />}
         {label}
         {typeof counter === 'number' && <Counter value={counter} />}
+        {Suffix && <Suffix className={tabsStyles.suffix} />}
       </>
     );
 
-    const linkClass = cx(tabsStyles.link, active ? tabsStyles.activeStyle : tabsStyles.notActive);
-
-    return (
-      <li className={tabsStyles.item}>
-        <a
-          href={href}
-          className={linkClass}
-          {...otherProps}
-          onClick={onChangeTab}
-          aria-label={otherProps['aria-label'] || selectors.components.Tab.title(label)}
-          ref={ref}
-        >
-          {content()}
-        </a>
-      </li>
+    const linkClass = cx(
+      clearStyles,
+      tabsStyles.link,
+      active ? tabsStyles.activeStyle : tabsStyles.notActive,
+      truncate && tabsStyles.linkTruncate
     );
+
+    const commonProps = {
+      className: linkClass,
+      'data-testid': selectors.components.Tab.title(label),
+      ...otherProps,
+      onClick: onChangeTab,
+      role: 'tab',
+      'aria-selected': active,
+      title: !!tooltip ? undefined : otherProps.title, // If tooltip is provided, don't set the title on the link or button, it looks weird
+    };
+
+    let tab = null;
+
+    if (href) {
+      tab = (
+        <div className={cx(tabsStyles.item, truncate && tabsStyles.itemTruncate, className)}>
+          <a
+            {...commonProps}
+            href={href}
+            // don't think we can avoid the type assertion here :(
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+            ref={ref as React.ForwardedRef<HTMLAnchorElement>}
+          >
+            {content()}
+          </a>
+        </div>
+      );
+    } else {
+      tab = (
+        <div className={cx(tabsStyles.item, truncate && tabsStyles.itemTruncate, className)}>
+          <button
+            {...commonProps}
+            type="button"
+            // don't think we can avoid the type assertion here :(
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+            ref={ref as React.ForwardedRef<HTMLButtonElement>}
+          >
+            {content()}
+          </button>
+        </div>
+      );
+    }
+
+    if (tooltip) {
+      return <Tooltip content={tooltip}>{tab}</Tooltip>;
+    }
+
+    return tab;
   }
 );
 
 Tab.displayName = 'Tab';
 
-const getTabStyles = stylesFactory((theme: GrafanaTheme2) => {
+const getStyles = (theme: GrafanaTheme2) => {
   return {
-    item: css`
-      list-style: none;
-      position: relative;
-      display: flex;
-    `,
-    link: css`
-      color: ${theme.colors.text.secondary};
-      padding: ${theme.spacing(1.5, 2, 1)};
-      display: block;
-      height: 100%;
-      svg {
-        margin-right: ${theme.spacing(1)};
-      }
+    item: css({
+      listStyle: 'none',
+      position: 'relative',
+      display: 'flex',
+      whiteSpace: 'nowrap',
+      padding: theme.spacing(0, 0.5),
+    }),
+    itemTruncate: css({
+      maxWidth: theme.spacing(40),
+    }),
+    link: css({
+      color: theme.colors.text.secondary,
+      padding: theme.spacing(1, 1.5, 1),
+      borderRadius: theme.shape.radius.default,
 
-      &:focus-visible {
-+        ${getFocusStyles(theme)}
-      }
-    `,
-    notActive: css`
-      a:hover,
-      &:hover,
-      &:focus {
-        color: ${theme.colors.text.primary};
+      display: 'block',
+      height: '100%',
 
-        &::before {
-          display: block;
-          content: ' ';
-          position: absolute;
-          left: 0;
-          right: 0;
-          height: 4px;
-          border-radius: 2px;
-          bottom: 0px;
-          background: ${theme.colors.action.hover};
-        }
-      }
-    `,
-    activeStyle: css`
-      label: activeTabStyle;
-      color: ${theme.colors.text.primary};
-      overflow: hidden;
-      font-weight: ${theme.typography.fontWeightMedium};
+      svg: {
+        marginRight: theme.spacing(1),
+      },
 
-      a {
-        color: ${theme.colors.text.primary};
-      }
+      '&:focus-visible': getFocusStyles(theme),
 
-      &::before {
-        display: block;
-        content: ' ';
-        position: absolute;
-        left: 0;
-        right: 0;
-        height: 4px;
-        border-radius: 2px;
-        bottom: 0px;
-        background-image: ${theme.colors.gradients.brandHorizontal} !important;
-      }
-    `,
+      '&::before': {
+        display: 'block',
+        content: '" "',
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: '2px',
+        borderRadius: theme.shape.radius.default,
+        bottom: 0,
+      },
+    }),
+    linkTruncate: css({
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      wordBreak: 'break-word',
+      overflow: 'hidden',
+    }),
+    notActive: css({
+      'a:hover, &:hover, &:focus': {
+        color: theme.colors.text.primary,
+
+        '&::before': {
+          backgroundColor: theme.colors.action.hover,
+        },
+      },
+    }),
+    activeStyle: css({
+      label: 'activeTabStyle',
+      color: theme.colors.text.primary,
+      overflow: 'hidden',
+
+      '&::before': {
+        backgroundImage: theme.colors.gradients.brandHorizontal,
+      },
+    }),
+    suffix: css({
+      marginLeft: theme.spacing(1),
+    }),
   };
-});
+};

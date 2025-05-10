@@ -1,4 +1,5 @@
-import React, { FC, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+
 import { GraphEdge, GraphNode } from './utils';
 
 interface OwnProps {
@@ -16,7 +17,7 @@ interface DispatchProps {}
 
 export type Props = OwnProps & ConnectedProps & DispatchProps;
 
-export const NetworkGraph: FC<Props> = ({ nodes, edges, direction, width, height, onDoubleClick }) => {
+export const NetworkGraph = ({ nodes, edges, direction, width, height, onDoubleClick }: Props) => {
   const network = useRef<any>(null);
   const ref = useRef(null);
 
@@ -77,7 +78,7 @@ export const NetworkGraph: FC<Props> = ({ nodes, edges, direction, width, height
 };
 
 function toVisNetworkNodes(visJs: any, nodes: GraphNode[]): any[] {
-  const nodesWithStyle: any[] = nodes.map((node) => ({
+  const nodesWithStyle = nodes.map((node) => ({
     ...node,
     shape: 'box',
   }));
@@ -85,6 +86,6 @@ function toVisNetworkNodes(visJs: any, nodes: GraphNode[]): any[] {
 }
 
 function toVisNetworkEdges(visJs: any, edges: GraphEdge[]): any[] {
-  const edgesWithStyle: any[] = edges.map((edge) => ({ ...edge, arrows: 'to', dashes: true }));
+  const edgesWithStyle = edges.map((edge) => ({ ...edge, arrows: 'to', dashes: true }));
   return new visJs.DataSet(edgesWithStyle);
 }

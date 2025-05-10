@@ -1,12 +1,16 @@
-import { isArray } from 'angular';
+import { has, isArray, isNil, omitBy, pickBy } from 'lodash';
+
 import {
-  AlertManagerCortexConfig,
+  AlertmanagerReceiver,
+  GrafanaManagedContactPoint,
   GrafanaManagedReceiverConfig,
+  GrafanaManagedReceiverSecureFields,
   Receiver,
-  Route,
 } from 'app/plugins/datasource/alertmanager/types';
-import { CloudNotifierType, NotifierDTO, NotifierType } from 'app/types';
+import { CloudNotifierType, NotificationChannelOption, NotifierDTO, NotifierType } from 'app/types';
+
 import {
+  ChannelValues,
   CloudChannelConfig,
   CloudChannelMap,
   CloudChannelValues,
@@ -16,8 +20,7 @@ import {
 } from '../types/receiver-form';
 
 export function grafanaReceiverToFormValues(
-  receiver: Receiver,
-  notifiers: NotifierDTO[]
+  receiver: GrafanaManagedContactPoint
 ): [ReceiverFormValues<GrafanaChannelValues>, GrafanaChannelMap] {
   const channelMap: GrafanaChannelMap = {};
   // giving each form receiver item a unique id so we can use it to map back to "original" items
@@ -30,8 +33,7 @@ export function grafanaReceiverToFormValues(
       receiver.grafana_managed_receiver_configs?.map((channel) => {
         const id = String(idCounter++);
         channelMap[id] = channel;
-        const notifier = notifiers.find(({ type }) => type === channel.type);
-        return grafanaChannelConfigToFormChannelValues(id, channel, notifier);
+        return grafanaChannelConfigToFormChannelValues(id, channel);
       }) ?? [],
   };
   return [values, channelMap];
@@ -50,7 +52,7 @@ export function cloudReceiverToFormValues(
     // map property names to cloud notifier types by removing the `_config` suffix
     .map(([type, configs]): [CloudNotifierType, CloudChannelConfig[]] => [
       type.replace('_configs', '') as CloudNotifierType,
-      configs as CloudChannelConfig[],
+      configs,
     ])
     // convert channel configs to form values
     .map(([type, configs]) =>
@@ -76,11 +78,12 @@ export function formValuesToGrafanaReceiver(
   values: ReceiverFormValues<GrafanaChannelValues>,
   channelMap: GrafanaChannelMap,
   defaultChannelValues: GrafanaChannelValues
-): Receiver {
+): GrafanaManagedContactPoint {
   return {
     name: values.name,
     grafana_managed_receiver_configs: (values.items ?? []).map((channelValues) => {
       const existing: GrafanaManagedReceiverConfig | undefined = channelMap[channelValues.__id];
+
       return formChannelValuesToGrafanaChannelConfig(channelValues, defaultChannelValues, values.name, existing);
     }),
   };
@@ -89,80 +92,69 @@ export function formValuesToGrafanaReceiver(
 export function formValuesToCloudReceiver(
   values: ReceiverFormValues<CloudChannelValues>,
   defaults: CloudChannelValues
-): Receiver {
-  const recv: Receiver = {
+): AlertmanagerReceiver {
+  const recv: AlertmanagerReceiver = {
     name: values.name,
   };
   values.items.forEach(({ __id, type, settings, sendResolved }) => {
-    const channel = omitEmptyValues({
-      ...settings,
+    const channelWithOmmitedIdentifiers = omitEmptyValues({
+      ...omitTemporaryIdentifiers(settings),
       send_resolved: sendResolved ?? defaults.sendResolved,
     });
 
-    const configsKey = `${type}_configs`;
-    if (!recv[configsKey]) {
-      recv[configsKey] = [channel];
+    const channel =
+      type === 'jira' ? convertJiraFieldToJson(channelWithOmmitedIdentifiers) : channelWithOmmitedIdentifiers;
+
+    if (!(`${type}_configs` in recv)) {
+      recv[`${type}_configs`] = [channel];
     } else {
-      (recv[configsKey] as unknown[]).push(channel);
+      recv[`${type}_configs`]?.push(channel);
     }
   });
   return recv;
 }
 
-// will add new receiver, or replace exisitng one
-export function updateConfigWithReceiver(
-  config: AlertManagerCortexConfig,
-  receiver: Receiver,
-  replaceReceiverName?: string
-): AlertManagerCortexConfig {
-  const oldReceivers = config.alertmanager_config.receivers ?? [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function convertJiraFieldToJson(object: Record<string, any>) {
+  // Only for cloud alert manager. Jira fields option can be a nested object. We need to convert it to JSON.
 
-  // sanity check that name is not duplicated
-  if (receiver.name !== replaceReceiverName && !!oldReceivers.find(({ name }) => name === receiver.name)) {
-    throw new Error(`Duplicate receiver name ${receiver.name}`);
+  const objectCopy = structuredClone(object);
+
+  if (typeof objectCopy.fields === 'object') {
+    for (const [optionName, optionValue] of Object.entries(objectCopy.fields)) {
+      let valueForField;
+      try {
+        // eslint-disable-next-line
+        valueForField = JSON.parse(optionValue as string); // is a stringified object
+      } catch {
+        valueForField = optionValue; // is not a stringified object
+      }
+      objectCopy.fields[optionName] = valueForField;
+    }
   }
 
-  // sanity check that existing receiver exists
-  if (replaceReceiverName && !oldReceivers.find(({ name }) => name === replaceReceiverName)) {
-    throw new Error(`Expected receiver ${replaceReceiverName} to exist, but did not find it in the config`);
-  }
-
-  const updated: AlertManagerCortexConfig = {
-    ...config,
-    alertmanager_config: {
-      // @todo rename receiver on routes as necessary
-      ...config.alertmanager_config,
-      receivers: replaceReceiverName
-        ? oldReceivers.map((existingReceiver) =>
-            existingReceiver.name === replaceReceiverName ? receiver : existingReceiver
-          )
-        : [...oldReceivers, receiver],
-    },
-  };
-
-  // if receiver was renamed, rename it in routes as well
-  if (updated.alertmanager_config.route && replaceReceiverName && receiver.name !== replaceReceiverName) {
-    updated.alertmanager_config.route = renameReceiverInRoute(
-      updated.alertmanager_config.route,
-      replaceReceiverName,
-      receiver.name
-    );
-  }
-
-  return updated;
+  return objectCopy;
 }
 
-function renameReceiverInRoute(route: Route, oldName: string, newName: string) {
-  const updated: Route = {
-    ...route,
-  };
-  if (updated.receiver === oldName) {
-    updated.receiver = newName;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function convertJsonToJiraField(object: Record<string, any>) {
+  // Only for cloud alert manager. Convert JSON back to nested Jira fields option.
+
+  const objectCopy = structuredClone(object);
+
+  if (typeof objectCopy.fields === 'object') {
+    for (const [optionName, optionValue] of Object.entries(objectCopy.fields)) {
+      let valueForField;
+      if (typeof optionValue === 'object') {
+        valueForField = JSON.stringify(optionValue);
+      } else {
+        valueForField = optionValue;
+      }
+      objectCopy.fields[optionName] = valueForField;
+    }
   }
-  if (updated.routes) {
-    updated.routes = updated.routes.map((route) => renameReceiverInRoute(route, oldName, newName));
-  }
-  return updated;
+
+  return objectCopy;
 }
 
 function cloudChannelConfigToFormChannelValues(
@@ -174,37 +166,57 @@ function cloudChannelConfigToFormChannelValues(
     __id: id,
     type,
     settings: {
-      ...channel,
+      ...(type === 'jira' ? convertJsonToJiraField(channel) : channel),
     },
     secureFields: {},
-    secureSettings: {},
     sendResolved: channel.send_resolved,
   };
 }
 
 function grafanaChannelConfigToFormChannelValues(
   id: string,
-  channel: GrafanaManagedReceiverConfig,
-  notifier?: NotifierDTO
+  channel: GrafanaManagedReceiverConfig
 ): GrafanaChannelValues {
   const values: GrafanaChannelValues = {
     __id: id,
     type: channel.type as NotifierType,
-    secureSettings: {},
+    provenance: channel.provenance,
     settings: { ...channel.settings },
     secureFields: { ...channel.secureFields },
     disableResolveMessage: channel.disableResolveMessage,
   };
 
-  // work around https://github.com/grafana/alerting-squad/issues/100
-  notifier?.options.forEach((option) => {
-    if (option.secure && values.settings[option.propertyName]) {
-      delete values.settings[option.propertyName];
-      values.secureFields[option.propertyName] = true;
-    }
-  });
-
   return values;
+}
+
+/**
+ * Recursively find all keys that should be marked a secure fields, using JSONpath for nested fields.
+ */
+export function getSecureFieldNames(notifier: NotifierDTO): string[] {
+  // eg. ['foo', 'bar.baz']
+  const secureFieldPaths: string[] = [];
+
+  // we'll pass in the prefix for each iteration so we can track the JSON path
+  function findSecureOptions(options: NotificationChannelOption[], prefix?: string) {
+    for (const option of options) {
+      const key = prefix ? `${prefix}.${option.propertyName}` : option.propertyName;
+
+      // if the field is a subform, recurse
+      if (option.subformOptions) {
+        findSecureOptions(option.subformOptions, key);
+        continue;
+      }
+
+      if (option.secure) {
+        secureFieldPaths.push(key);
+        continue;
+      }
+    }
+  }
+
+  findSecureOptions(notifier.options);
+
+  return secureFieldPaths;
 }
 
 export function formChannelValuesToGrafanaChannelConfig(
@@ -213,22 +225,36 @@ export function formChannelValuesToGrafanaChannelConfig(
   name: string,
   existing?: GrafanaManagedReceiverConfig
 ): GrafanaManagedReceiverConfig {
+  const secureFieldsFromValues = values.secureFields ? omitFalsySecureFields(values.secureFields) : undefined;
+
   const channel: GrafanaManagedReceiverConfig = {
     settings: omitEmptyValues({
-      ...(existing && existing.type === values.type ? existing.settings ?? {} : {}),
+      ...(existing && existing.type === values.type ? (existing.settings ?? {}) : {}),
       ...(values.settings ?? {}),
     }),
-    secureSettings: values.secureSettings ?? {},
+    secureFields: secureFieldsFromValues,
     type: values.type,
     name,
     disableResolveMessage:
       values.disableResolveMessage ?? existing?.disableResolveMessage ?? defaults.disableResolveMessage,
   };
+
   if (existing) {
     channel.uid = existing.uid;
   }
+
   return channel;
 }
+
+/**
+ * Omit falsy values from secure fields object so the backend knows to reset them
+ */
+function omitFalsySecureFields(secureFields: ChannelValues['secureFields']): GrafanaManagedReceiverSecureFields {
+  return pickBy(secureFields, (value) => value === true);
+}
+
+// null, undefined and '' are deemed unacceptable
+const isUnacceptableValue = (value: unknown) => isNil(value) || value === '';
 
 // will remove properties that have empty ('', null, undefined) object properties.
 // traverses nested objects and arrays as well. in place, mutates the object.
@@ -240,7 +266,7 @@ export function omitEmptyValues<T>(obj: T): T {
     obj.forEach(omitEmptyValues);
   } else if (typeof obj === 'object' && obj !== null) {
     Object.entries(obj).forEach(([key, value]) => {
-      if (value === '' || value === null || value === undefined) {
+      if (isUnacceptableValue(value)) {
         delete (obj as any)[key];
       } else {
         omitEmptyValues(value);
@@ -248,4 +274,28 @@ export function omitEmptyValues<T>(obj: T): T {
     });
   }
   return obj;
+}
+
+// Will remove empty ('', null, undefined) object properties unless they were previously defined.
+// existing is a map of property names that were previously defined.
+export function omitEmptyUnlessExisting(settings = {}, existing = {}): Record<string, unknown> {
+  return omitBy(settings, (value, key) => isUnacceptableValue(value) && !has(existing, key));
+}
+
+export function omitTemporaryIdentifiers<T>(object: Readonly<T>): T {
+  function omitIdentifiers<T>(obj: T) {
+    if (isArray(obj)) {
+      obj.forEach(omitIdentifiers);
+    } else if (typeof obj === 'object' && obj !== null) {
+      if ('__id' in obj) {
+        delete obj.__id;
+      }
+      Object.values(obj).forEach(omitIdentifiers);
+    }
+  }
+
+  const objectCopy = structuredClone(object);
+  omitIdentifiers(objectCopy);
+
+  return objectCopy;
 }
