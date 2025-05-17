@@ -1,55 +1,11 @@
-import { LegendDisplayMode } from '@grafana/schema';
-import {
-  ApplyFieldOverrideOptions,
-  DataTransformerConfig,
-  dateMath,
-  FieldColorModeId,
-  NavModelItem,
-  PanelData,
-} from '@grafana/data';
-import { Table, TimeSeries } from '@grafana/ui';
-import { config } from 'app/core/config';
-import React, { FC, useMemo, useState } from 'react';
-import { useObservable } from 'react-use';
-import { QueryGroup } from '../query/components/QueryGroup';
-import { PanelQueryRunner } from '../query/state/PanelQueryRunner';
-import { QueryGroupOptions } from 'app/types';
-import Page from '../../core/components/Page/Page';
-import AutoSizer from 'react-virtualized-auto-sizer';
+import { NavModelItem } from '@grafana/data';
+import { Trans } from '@grafana/i18n';
+import { usePluginLinks } from '@grafana/runtime';
+import { Button, LinkButton, Stack, Text } from '@grafana/ui';
+import { Page } from 'app/core/components/Page/Page';
+import { useAppNotification } from 'app/core/copy/appNotification';
 
-interface State {
-  queryRunner: PanelQueryRunner;
-  queryOptions: QueryGroupOptions;
-  data?: PanelData;
-}
-
-export const TestStuffPage: FC = () => {
-  const [state, setState] = useState<State>(getDefaultState());
-  const { queryOptions, queryRunner } = state;
-
-  const onRunQueries = () => {
-    const timeRange = { from: 'now-1h', to: 'now' };
-
-    queryRunner.run({
-      queries: queryOptions.queries,
-      datasource: queryOptions.dataSource.name!,
-      timezone: 'browser',
-      timeRange: { from: dateMath.parse(timeRange.from)!, to: dateMath.parse(timeRange.to)!, raw: timeRange },
-      maxDataPoints: queryOptions.maxDataPoints ?? 100,
-      minInterval: queryOptions.minInterval,
-    });
-  };
-
-  const onOptionsChange = (queryOptions: QueryGroupOptions) => {
-    setState({ ...state, queryOptions });
-  };
-
-  /**
-   * Subscribe to data
-   */
-  const observable = useMemo(() => queryRunner.getData({ withFieldConfig: true, withTransforms: true }), [queryRunner]);
-  const data = useObservable(observable);
-
+export const TestStuffPage = () => {
   const node: NavModelItem = {
     id: 'test-page',
     text: 'Test page',
@@ -58,71 +14,55 @@ export const TestStuffPage: FC = () => {
     url: 'sandbox/test',
   };
 
+  const notifyApp = useAppNotification();
+
   return (
     <Page navModel={{ node: node, main: node }}>
-      <Page.Contents>
-        {data && (
-          <AutoSizer style={{ width: '100%', height: '600px' }}>
-            {({ width }) => {
-              return (
-                <div>
-                  <TimeSeries
-                    width={width}
-                    height={300}
-                    frames={data.series}
-                    legend={{ displayMode: LegendDisplayMode.List, placement: 'bottom', calcs: [] }}
-                    timeRange={data.timeRange}
-                    timeZone="browser"
-                  />
-                  <Table data={data.series[0]} width={width} height={300} />
-                </div>
-              );
-            }}
-          </AutoSizer>
-        )}
-        <div style={{ marginTop: '16px', height: '45%' }}>
-          <QueryGroup
-            options={queryOptions}
-            queryRunner={queryRunner}
-            onRunQueries={onRunQueries}
-            onOptionsChange={onOptionsChange}
-          />
-        </div>
-      </Page.Contents>
+      <LinkToBasicApp extensionPointId="grafana/sandbox/testing" />
+      <Text variant="h5">
+        <Trans i18nKey="sandbox.test-stuff-page.application-notifications-toasts-testing">
+          Application notifications (toasts) testing
+        </Trans>
+      </Text>
+      <Stack>
+        <Button onClick={() => notifyApp.success('Success toast', 'some more text goes here')} variant="primary">
+          <Trans i18nKey="sandbox.test-stuff-page.success">Success</Trans>
+        </Button>
+        <Button
+          onClick={() => notifyApp.warning('Warning toast', 'some more text goes here', 'bogus-trace-99999')}
+          variant="secondary"
+        >
+          <Trans i18nKey="sandbox.test-stuff-page.warning">Warning</Trans>
+        </Button>
+        <Button
+          onClick={() => notifyApp.error('Error toast', 'some more text goes here', 'bogus-trace-fdsfdfsfds')}
+          variant="destructive"
+        >
+          <Trans i18nKey="sandbox.test-stuff-page.error">Error</Trans>
+        </Button>
+      </Stack>
     </Page>
   );
 };
 
-export function getDefaultState(): State {
-  const options: ApplyFieldOverrideOptions = {
-    fieldConfig: {
-      defaults: {
-        color: {
-          mode: FieldColorModeId.PaletteClassic,
-        },
-      },
-      overrides: [],
-    },
-    replaceVariables: (v: string) => v,
-    theme: config.theme2,
-  };
+function LinkToBasicApp({ extensionPointId }: { extensionPointId: string }) {
+  const { links } = usePluginLinks({ extensionPointId });
 
-  const dataConfig = {
-    getTransformations: () => [] as DataTransformerConfig[],
-    getFieldOverrideOptions: () => options,
-    getDataSupport: () => ({ annotations: false, alertStates: false }),
-  };
+  if (links.length === 0) {
+    return null;
+  }
 
-  return {
-    queryRunner: new PanelQueryRunner(dataConfig),
-    queryOptions: {
-      queries: [],
-      dataSource: {
-        name: 'gdev-testdata',
-      },
-      maxDataPoints: 100,
-    },
-  };
+  return (
+    <div>
+      {links.map((link, i) => {
+        return (
+          <LinkButton href={link.path} title={link.description} key={link.id}>
+            {link.title}
+          </LinkButton>
+        );
+      })}
+    </div>
+  );
 }
 
 export default TestStuffPage;

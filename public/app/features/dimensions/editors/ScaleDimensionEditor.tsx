@@ -1,23 +1,22 @@
-import React, { FC, useCallback, useMemo } from 'react';
-import { GrafanaTheme2, SelectableValue, StandardEditorProps } from '@grafana/data';
-import { ScaleDimensionConfig, ScaleDimensionOptions } from '../types';
-import { InlineField, InlineFieldRow, Select, useStyles2 } from '@grafana/ui';
-import {
-  useFieldDisplayNames,
-  useSelectOptions,
-} from '../../../../../packages/grafana-ui/src/components/MatchersUI/utils';
-import { NumberInput } from './NumberInput';
 import { css } from '@emotion/css';
+import { useCallback, useMemo } from 'react';
+
+import { GrafanaTheme2, SelectableValue, StandardEditorProps } from '@grafana/data';
+import { useTranslate } from '@grafana/i18n';
+import { ScaleDimensionConfig } from '@grafana/schema';
+import { InlineField, InlineFieldRow, Select, useStyles2 } from '@grafana/ui';
+import { useFieldDisplayNames, useSelectOptions } from '@grafana/ui/internal';
+import { NumberInput } from 'app/core/components/OptionsUI/NumberInput';
+
 import { validateScaleOptions, validateScaleConfig } from '../scale';
+import { ScaleDimensionOptions } from '../types';
 
 const fixedValueOption: SelectableValue<string> = {
   label: 'Fixed value',
   value: '_____fixed_____',
 };
 
-export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, ScaleDimensionOptions, any>> = (
-  props
-) => {
+export const ScaleDimensionEditor = (props: StandardEditorProps<ScaleDimensionConfig, ScaleDimensionOptions>) => {
   const { value, context, onChange, item } = props;
   const { settings } = item;
   const styles = useStyles2(getStyles);
@@ -25,7 +24,7 @@ export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, 
   const fieldName = value?.field;
   const isFixed = Boolean(!fieldName);
   const names = useFieldDisplayNames(context.data);
-  const selectOptions = useSelectOptions(names, fieldName, fixedValueOption);
+  const selectOptions = useSelectOptions(names, fieldName, fixedValueOption, settings?.filteredFieldType);
   const minMaxStep = useMemo(() => {
     return validateScaleOptions(settings);
   }, [settings]);
@@ -92,6 +91,7 @@ export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, 
     },
     [validateAndDoChange, value]
   );
+  const { t } = useTranslate();
 
   const val = value ?? {};
   const selectedOption = isFixed ? fixedValueOption : selectOptions.find((v) => v.value === fieldName);
@@ -99,7 +99,6 @@ export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, 
     <>
       <div>
         <Select
-          menuShouldPortal
           value={selectedOption}
           options={selectOptions}
           onChange={onSelectChange}
@@ -109,7 +108,7 @@ export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, 
       <div className={styles.range}>
         {isFixed && (
           <InlineFieldRow>
-            <InlineField label="Value" labelWidth={8} grow={true}>
+            <InlineField label={t('dimensions.scale-dimension-editor.label-value', 'Value')} labelWidth={8} grow={true}>
               <NumberInput value={val.fixed} {...minMaxStep} onChange={onValueChange} />
             </InlineField>
           </InlineFieldRow>
@@ -117,12 +116,12 @@ export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, 
         {!isFixed && !minMaxStep.hideRange && (
           <>
             <InlineFieldRow>
-              <InlineField label="Min" labelWidth={8} grow={true}>
+              <InlineField label={t('dimensions.scale-dimension-editor.label-min', 'Min')} labelWidth={8} grow={true}>
                 <NumberInput value={val.min} {...minMaxStep} onChange={onMinChange} />
               </InlineField>
             </InlineFieldRow>
             <InlineFieldRow>
-              <InlineField label="Max" labelWidth={8} grow={true}>
+              <InlineField label={t('dimensions.scale-dimension-editor.label-max', 'Max')} labelWidth={8} grow={true}>
                 <NumberInput value={val.max} {...minMaxStep} onChange={onMaxChange} />
               </InlineField>
             </InlineFieldRow>
@@ -134,7 +133,7 @@ export const ScaleDimensionEditor: FC<StandardEditorProps<ScaleDimensionConfig, 
 };
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  range: css`
-    padding-top: 8px;
-  `,
+  range: css({
+    paddingTop: theme.spacing(1),
+  }),
 });

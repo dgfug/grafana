@@ -1,49 +1,55 @@
-import resolve from '@rollup/plugin-node-resolve';
-import commonjs from '@rollup/plugin-commonjs';
-import image from '@rollup/plugin-image';
-import { terser } from 'rollup-plugin-terser';
+import { createRequire } from 'node:module';
+import copy from 'rollup-plugin-copy';
+import svg from 'rollup-plugin-svg-import';
 
-const pkg = require('./package.json');
+import { cjsOutput, entryPoint, esmOutput, plugins, tsDeclarationOutput } from '../rollup.config.parts';
 
-const libraryName = pkg.name;
+const rq = createRequire(import.meta.url);
+const icons = rq('../../public/app/core/icons/cached.json');
+const pkg = rq('./package.json');
 
-const buildCjsPackage = ({ env }) => {
-  return {
-    input: `compiled/index.js`,
+const iconSrcPaths = icons.map((iconSubPath) => {
+  // eslint-disable-next-line @grafana/no-restricted-img-srcs
+  return `../../public/img/icons/${iconSubPath}.svg`;
+});
+
+export default [
+  {
+    input: entryPoint,
+    plugins: [
+      ...plugins,
+      svg({ stringify: true }),
+      copy({
+        targets: [{ src: iconSrcPaths, dest: './dist/public/' }],
+        flatten: false,
+      }),
+    ],
+    output: [cjsOutput(pkg), esmOutput(pkg, 'grafana-ui')],
+  },
+  {
+    input: 'src/unstable.ts',
+    plugins: [
+      ...plugins,
+      svg({ stringify: true }),
+      copy({
+        targets: [{ src: iconSrcPaths, dest: './dist/public/' }],
+        flatten: false,
+      }),
+    ],
+    output: [cjsOutput(pkg), esmOutput(pkg, 'grafana-ui')],
+  },
+  tsDeclarationOutput(pkg),
+  tsDeclarationOutput(pkg, {
+    input: './compiled/unstable.d.ts',
     output: [
       {
-        dir: 'dist',
-        name: libraryName,
+        file: './dist/cjs/unstable.d.cts',
         format: 'cjs',
-        sourcemap: true,
-        strict: false,
-        exports: 'named',
-        chunkFileNames: `[name].${env}.js`,
-        globals: {
-          react: 'React',
-          'prop-types': 'PropTypes',
-        },
+      },
+      {
+        file: './dist/esm/unstable.d.mts',
+        format: 'es',
       },
     ],
-    external: [
-      'react',
-      'react-dom',
-      '@grafana/aws-sdk',
-      '@grafana/data',
-      '@grafana/schema',
-      '@grafana/e2e-selectors',
-      'moment',
-      'jquery', // required to use jquery.plot, which is assigned externally
-      'react-inlinesvg', // required to mock Icon svg loading in tests
-    ],
-    plugins: [
-      commonjs({
-        include: /node_modules/,
-      }),
-      resolve(),
-      image(),
-      env === 'production' && terser(),
-    ],
-  };
-};
-export default [buildCjsPackage({ env: 'development' }), buildCjsPackage({ env: 'production' })];
+  }),
+];

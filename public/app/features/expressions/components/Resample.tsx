@@ -1,16 +1,21 @@
-import React, { ChangeEvent, FC } from 'react';
+import { ChangeEvent } from 'react';
+
 import { SelectableValue } from '@grafana/data';
+import { useTranslate } from '@grafana/i18n';
 import { InlineField, InlineFieldRow, Input, Select } from '@grafana/ui';
+
 import { downsamplingTypes, ExpressionQuery, upsamplingTypes } from '../types';
 
 interface Props {
   refIds: Array<SelectableValue<string>>;
   query: ExpressionQuery;
-  labelWidth: number;
+  labelWidth?: number | 'auto';
   onChange: (query: ExpressionQuery) => void;
 }
 
-export const Resample: FC<Props> = ({ labelWidth, onChange, refIds, query }) => {
+export const Resample = ({ labelWidth = 'auto', onChange, refIds, query }: Props) => {
+  const { t } = useTranslate();
+
   const downsampler = downsamplingTypes.find((o) => o.value === query.downsampler);
   const upsampler = upsamplingTypes.find((o) => o.value === query.upsampler);
 
@@ -33,31 +38,23 @@ export const Resample: FC<Props> = ({ labelWidth, onChange, refIds, query }) => 
   return (
     <>
       <InlineFieldRow>
-        <InlineField label="Input" labelWidth={labelWidth}>
-          <Select menuShouldPortal onChange={onRefIdChange} options={refIds} value={query.expression} width={20} />
+        <InlineField label={t('expressions.resample.label-input', 'Input')} labelWidth={labelWidth}>
+          <Select onChange={onRefIdChange} options={refIds} value={query.expression} width={20} />
         </InlineField>
       </InlineFieldRow>
       <InlineFieldRow>
-        <InlineField label="Resample to" labelWidth={labelWidth} tooltip="10s, 1m, 30m, 1h">
+        <InlineField
+          label={t('expressions.resample.label-resample-to', 'Resample to')}
+          labelWidth={labelWidth}
+          tooltip={t('expressions.resample.tooltip-s-m-h', '10s, 1m, 30m, 1h')}
+        >
           <Input onChange={onWindowChange} value={query.window} width={15} />
         </InlineField>
-        <InlineField label="Downsample">
-          <Select
-            menuShouldPortal
-            options={downsamplingTypes}
-            value={downsampler}
-            onChange={onSelectDownsampler}
-            width={25}
-          />
+        <InlineField label={t('expressions.resample.label-downsample', 'Downsample')}>
+          <Select options={downsamplingTypes} value={downsampler} onChange={onSelectDownsampler} width={25} />
         </InlineField>
-        <InlineField label="Upsample">
-          <Select
-            menuShouldPortal
-            options={upsamplingTypes}
-            value={upsampler}
-            onChange={onSelectUpsampler}
-            width={25}
-          />
+        <InlineField label={t('expressions.resample.label-upsample', 'Upsample')}>
+          <Select options={upsamplingTypes} value={upsampler} onChange={onSelectUpsampler} width={25} />
         </InlineField>
       </InlineFieldRow>
     </>

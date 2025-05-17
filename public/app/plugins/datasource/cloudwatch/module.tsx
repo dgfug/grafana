@@ -1,20 +1,21 @@
-import { DataSourcePlugin } from '@grafana/data';
-import { ConfigEditor } from './components/ConfigEditor';
+import { DashboardLoadedEvent, DataSourcePlugin } from '@grafana/data';
+import { getAppEvents } from '@grafana/runtime';
+
+import LogsCheatSheet from './components/CheatSheet/LogsCheatSheet';
+import { ConfigEditor } from './components/ConfigEditor/ConfigEditor';
+import { MetaInspector } from './components/MetaInspector/MetaInspector';
+import { QueryEditor } from './components/QueryEditor/QueryEditor';
 import { CloudWatchDatasource } from './datasource';
-import { CloudWatchAnnotationsQueryCtrl } from './annotations_query_ctrl';
+import { onDashboardLoadedHandler } from './tracking';
 import { CloudWatchJsonData, CloudWatchQuery } from './types';
-import { CloudWatchLogsQueryEditor } from './components/LogsQueryEditor';
-import { PanelQueryEditor } from './components/PanelQueryEditor';
-import LogsCheatSheet from './components/LogsCheatSheet';
-import { LiveMeasurementsSupport } from 'app/features/live/measurements/measurementsSupport';
 
 export const plugin = new DataSourcePlugin<CloudWatchDatasource, CloudWatchQuery, CloudWatchJsonData>(
   CloudWatchDatasource
 )
   .setQueryEditorHelp(LogsCheatSheet)
   .setConfigEditor(ConfigEditor)
-  .setQueryEditor(PanelQueryEditor)
-  .setExploreMetricsQueryField(PanelQueryEditor)
-  .setExploreLogsQueryField(CloudWatchLogsQueryEditor)
-  .setAnnotationQueryCtrl(CloudWatchAnnotationsQueryCtrl)
-  .setChannelSupport(new LiveMeasurementsSupport());
+  .setQueryEditor(QueryEditor)
+  .setMetadataInspector(MetaInspector);
+
+// Subscribe to on dashboard loaded event so that we can track plugin adoption
+getAppEvents().subscribe<DashboardLoadedEvent<CloudWatchQuery>>(DashboardLoadedEvent, onDashboardLoadedHandler);

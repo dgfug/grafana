@@ -1,5 +1,5 @@
-import { OptionsPaneItemDescriptor } from '../OptionsPaneItemDescriptor';
 import { OptionsPaneCategoryDescriptor } from '../OptionsPaneCategoryDescriptor';
+import { OptionsPaneItemDescriptor } from '../OptionsPaneItemDescriptor';
 
 export interface OptionSearchResults {
   optionHits: OptionsPaneItemDescriptor[];
@@ -34,7 +34,7 @@ export class OptionSearchEngine {
       const categoryNameMatch = searchRegex.test(category.props.title);
 
       for (const item of category.items) {
-        if (searchRegex.test(item.props.title)) {
+        if (searchRegex.test(item.props.title || '')) {
           hits.push({ item: item, rank: 1 });
           continue;
         }
@@ -56,7 +56,7 @@ export class OptionSearchEngine {
   }
 
   getAllOptionsCount(categories: OptionsPaneCategoryDescriptor[]) {
-    var total = 0;
+    let total = 0;
 
     for (const category of categories) {
       total += category.items.length;

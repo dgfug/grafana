@@ -1,68 +1,143 @@
-// Use the real plugin_loader (stubbed by default)
-jest.unmock('app/features/plugins/plugin_loader');
+import { i18n } from 'i18next';
 
-(global as any).ace = {
-  define: jest.fn(),
-};
+import * as i18nModule from '@grafana/i18n/internal';
 
-jest.mock('app/core/core', () => {
-  return {
-    coreModule: {
-      directive: jest.fn(),
-    },
-  };
-});
+import { server } from './loader/pluginLoader.mock';
+import { SystemJS } from './loader/systemjs';
+import { SystemJSWithLoaderHooks } from './loader/types';
+import { addTranslationsToI18n } from './plugin_loader';
 
-import { SystemJS } from '@grafana/runtime';
-import { AppPluginMeta, PluginMetaInfo, PluginType, AppPlugin } from '@grafana/data';
+describe('plugin_loader', () => {
+  describe('addTranslationsToI18n', () => {
+    const systemJSPrototype: SystemJSWithLoaderHooks = SystemJS.constructor.prototype;
+    const originalFetch = systemJSPrototype.fetch;
+    const originalResolve = systemJSPrototype.resolve;
+    let addResourceBundleSpy: jest.SpyInstance;
 
-// Loaded after the `unmock` abve
-import { importAppPlugin } from './plugin_loader';
+    beforeAll(() => {
+      server.listen();
+      systemJSPrototype.resolve = (moduleId: string) => moduleId;
+      systemJSPrototype.shouldFetch = () => true;
+      // because server.listen() patches fetch, we need to reassign this to the systemJSPrototype
+      // this is identical to what happens in the original code: https://github.com/systemjs/systemjs/blob/main/src/features/fetch-load.js#L12
+      systemJSPrototype.fetch = window.fetch;
+    });
 
-class MyCustomApp extends AppPlugin {
-  initWasCalled = false;
-  calledTwice = false;
+    beforeEach(() => {
+      addResourceBundleSpy = jest
+        .spyOn(i18nModule, 'addResourceBundle')
+        .mockImplementation(() => ({}) as unknown as i18n);
+    });
 
-  init(meta: AppPluginMeta) {
-    this.initWasCalled = true;
-    this.calledTwice = this.meta === meta;
-  }
-}
+    afterEach(() => {
+      server.resetHandlers();
+      jest.clearAllMocks();
+    });
 
-describe('Load App', () => {
-  const app = new MyCustomApp();
-  const modulePath = 'my/custom/plugin/module';
+    afterAll(() => {
+      SystemJS.constructor.prototype.resolve = originalResolve;
+      SystemJS.constructor.prototype.fetch = originalFetch;
+      server.close();
+    });
 
-  beforeAll(() => {
-    SystemJS.set(modulePath, SystemJS.newModule({ plugin: app }));
-  });
+    it('should add translations that match the resolved language first', async () => {
+      const translations = {
+        'en-US': '/public/plugins/test-panel/locales/en-US/test-panel.json',
+        'pt-BR': '/public/plugins/test-panel/locales/pt-BR/test-panel.json',
+      };
 
-  afterAll(() => {
-    SystemJS.delete(modulePath);
-  });
+      await addTranslationsToI18n({
+        resolvedLanguage: 'pt-BR',
+        fallbackLanguage: 'en-US',
+        pluginId: 'test-panel',
+        translations,
+      });
 
-  it('should call init and set meta', async () => {
-    const meta: AppPluginMeta = {
-      id: 'test-app',
-      module: modulePath,
-      baseUrl: 'xxx',
-      info: {} as PluginMetaInfo,
-      type: PluginType.app,
-      name: 'test',
-    };
+      expect(addResourceBundleSpy).toHaveBeenCalledTimes(1);
+      expect(addResourceBundleSpy).toHaveBeenNthCalledWith(1, 'pt-BR', 'test-panel', { testKey: 'valorDeTeste' });
+    });
 
-    // Check that we mocked the import OK
-    const m = await SystemJS.import(modulePath);
-    expect(m.plugin).toBe(app);
+    it('should add translations that match the fallback language if the resolved language is not in the translations', async () => {
+      const translations = {
+        'en-US': '/public/plugins/test-panel/locales/en-US/test-panel.json',
+        'pt-BR': '/public/plugins/test-panel/locales/pt-BR/test-panel.json',
+      };
 
-    const loaded = await importAppPlugin(meta);
-    expect(loaded).toBe(app);
-    expect(app.meta).toBe(meta);
-    expect(app.initWasCalled).toBeTruthy();
-    expect(app.calledTwice).toBeFalsy();
+      await addTranslationsToI18n({
+        resolvedLanguage: 'sv-SE',
+        fallbackLanguage: 'en-US',
+        pluginId: 'test-panel',
+        translations,
+      });
 
-    const again = await importAppPlugin(meta);
-    expect(again).toBe(app);
-    expect(app.calledTwice).toBeTruthy();
+      expect(addResourceBundleSpy).toHaveBeenCalledTimes(1);
+      expect(addResourceBundleSpy).toHaveBeenNthCalledWith(1, 'en-US', 'test-panel', { testKey: 'testValue' });
+    });
+
+    it('should warn if no translations are found', async () => {
+      const translations = {
+        'en-US': '/public/plugins/test-panel/locales/en-US/test-panel.json',
+        'pt-BR': '/public/plugins/test-panel/locales/pt-BR/test-panel.json',
+      };
+
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await addTranslationsToI18n({
+        resolvedLanguage: 'sv-SE',
+        fallbackLanguage: 'sv-SE',
+        pluginId: 'test-panel',
+        translations,
+      });
+
+      expect(consoleSpy).toHaveBeenCalledWith('Could not find any translation for plugin test-panel', {
+        resolvedLanguage: 'sv-SE',
+        fallbackLanguage: 'sv-SE',
+      });
+    });
+
+    it('should warn if no exported default is found', async () => {
+      const translations = {
+        'en-US': '/public/plugins/test-panel/locales/en-US/no-default-export.json',
+        'pt-BR': '/public/plugins/test-panel/locales/pt-BR/no-default-export.json',
+      };
+
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await addTranslationsToI18n({
+        resolvedLanguage: 'en-US',
+        fallbackLanguage: 'en-US',
+        pluginId: 'test-panel',
+        translations,
+      });
+
+      expect(consoleSpy).toHaveBeenCalledWith('Could not find default export for plugin test-panel', {
+        resolvedLanguage: 'en-US',
+        fallbackLanguage: 'en-US',
+        path: '/public/plugins/test-panel/locales/en-US/no-default-export.json',
+      });
+    });
+
+    it('should warn if translations cannot be loaded', async () => {
+      const translations = {
+        'en-US': '/public/plugins/test-panel/locales/en-US/unknown.json',
+        'pt-BR': '/public/plugins/test-panel/locales/pt-BR/unknown.json',
+      };
+
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await addTranslationsToI18n({
+        resolvedLanguage: 'en-US',
+        fallbackLanguage: 'pt-BR',
+        pluginId: 'test-panel',
+        translations,
+      });
+
+      expect(consoleSpy).toHaveBeenCalledWith('Could not load translation for plugin test-panel', {
+        resolvedLanguage: 'en-US',
+        fallbackLanguage: 'pt-BR',
+        error: new TypeError('Failed to fetch'),
+        path: '/public/plugins/test-panel/locales/en-US/unknown.json',
+      });
+    });
   });
 });

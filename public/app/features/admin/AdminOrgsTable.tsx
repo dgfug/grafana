@@ -1,23 +1,42 @@
-import React, { FC, useState } from 'react';
-import { Organization } from 'app/types';
-import { Button, ConfirmModal } from '@grafana/ui';
+import { css } from '@emotion/css';
+import { useState } from 'react';
+import Skeleton from 'react-loading-skeleton';
+
+import { GrafanaTheme2 } from '@grafana/data';
+import { Trans, useTranslate } from '@grafana/i18n';
+import { Button, ConfirmModal, useStyles2 } from '@grafana/ui';
+import { SkeletonComponent, attachSkeleton } from '@grafana/ui/unstable';
+import { contextSrv } from 'app/core/core';
+import { AccessControlAction, Organization } from 'app/types';
 
 interface Props {
   orgs: Organization[];
   onDelete: (orgId: number) => void;
 }
 
-export const AdminOrgsTable: FC<Props> = ({ orgs, onDelete }) => {
+const getTableHeader = () => (
+  <thead>
+    <tr>
+      <th>
+        <Trans i18nKey="admin.orgs.id-header">ID</Trans>
+      </th>
+      <th>
+        <Trans i18nKey="admin.orgs.name-header">Name</Trans>
+      </th>
+      <th style={{ width: '1%' }}></th>
+    </tr>
+  </thead>
+);
+
+function AdminOrgsTableComponent({ orgs, onDelete }: Props) {
+  const canDeleteOrgs = contextSrv.hasPermission(AccessControlAction.OrgsDelete);
+
   const [deleteOrg, setDeleteOrg] = useState<Organization>();
+  const { t } = useTranslate();
+  const deleteOrgName = deleteOrg?.name;
   return (
     <table className="filter-table form-inline filter-table--hover">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Name</th>
-          <th style={{ width: '1%' }}></th>
-        </tr>
-      </thead>
+      {getTableHeader()}
       <tbody>
         {orgs.map((org) => (
           <tr key={`${org.id}-${org.name}`}>
@@ -33,7 +52,8 @@ export const AdminOrgsTable: FC<Props> = ({ orgs, onDelete }) => {
                 size="sm"
                 icon="times"
                 onClick={() => setDeleteOrg(org)}
-                aria-label="Delete org"
+                aria-label={t('admin.admin-orgs-table.aria-label-delete-org', 'Delete org')}
+                disabled={!canDeleteOrgs}
               />
             </td>
           </tr>
@@ -43,11 +63,13 @@ export const AdminOrgsTable: FC<Props> = ({ orgs, onDelete }) => {
         <ConfirmModal
           isOpen
           icon="trash-alt"
-          title="Delete"
+          title={t('admin.admin-orgs-table.title-delete', 'Delete')}
           body={
             <div>
-              Are you sure you want to delete &apos;{deleteOrg.name}&apos;?
-              <br /> <small>All dashboards for this organization will be removed!</small>
+              <Trans i18nKey="admin.orgs.delete-body">
+                Are you sure you want to delete &apos;{{ deleteOrgName }}&apos;?
+                <br /> <small>All dashboards for this organization will be removed!</small>
+              </Trans>
             </div>
           }
           confirmText="Delete"
@@ -60,4 +82,39 @@ export const AdminOrgsTable: FC<Props> = ({ orgs, onDelete }) => {
       )}
     </table>
   );
+}
+
+const AdminOrgsTableSkeleton: SkeletonComponent = ({ rootProps }) => {
+  const styles = useStyles2(getSkeletonStyles);
+  return (
+    <table className="filter-table" {...rootProps}>
+      {getTableHeader()}
+      <tbody>
+        {new Array(3).fill(null).map((_, index) => (
+          <tr key={index}>
+            <td>
+              <Skeleton width={16} />
+            </td>
+            <td>
+              <Skeleton width={240} />
+            </td>
+            <td>
+              <Skeleton containerClassName={styles.deleteButton} width={22} height={24} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 };
+
+export const AdminOrgsTable = attachSkeleton(AdminOrgsTableComponent, AdminOrgsTableSkeleton);
+
+const getSkeletonStyles = (theme: GrafanaTheme2) => ({
+  deleteButton: css({
+    alignItems: 'center',
+    display: 'flex',
+    height: 30,
+    lineHeight: 1,
+  }),
+});

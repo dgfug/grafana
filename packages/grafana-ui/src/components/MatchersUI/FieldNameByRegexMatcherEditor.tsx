@@ -1,7 +1,12 @@
-import React, { memo, useCallback } from 'react';
-import { MatcherUIProps, FieldMatcherUIRegistryItem } from './types';
+import { memo, useCallback } from 'react';
+import * as React from 'react';
+
 import { FieldMatcherID, fieldMatchers } from '@grafana/data';
+
+import { t } from '../../utils/i18n';
 import { Input } from '../Input/Input';
+
+import { MatcherUIProps, FieldMatcherUIRegistryItem } from './types';
 
 export const FieldNameByRegexMatcherEditor = memo<MatcherUIProps<string>>((props) => {
   const { options, onChange } = props;
@@ -13,7 +18,13 @@ export const FieldNameByRegexMatcherEditor = memo<MatcherUIProps<string>>((props
     [onChange]
   );
 
-  return <Input placeholder="Enter regular expression" defaultValue={options} onBlur={onBlur} />;
+  return (
+    <Input
+      placeholder={t('grafana-ui.field-name-by-regex-matcher.input-placeholder', 'Enter regular expression')}
+      defaultValue={options}
+      onBlur={onBlur}
+    />
+  );
 });
 FieldNameByRegexMatcherEditor.displayName = 'FieldNameByRegexMatcherEditor';
 

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import React from 'react';
+import userEvent from '@testing-library/user-event';
+
 import { FileDropzone } from './FileDropzone';
 import { REMOVE_FILE } from './FileListItem';
 
@@ -26,26 +27,41 @@ describe('The FileDropzone component', () => {
     expect(screen.getByText('Upload file')).toBeInTheDocument();
   });
 
-  it('should show accepted file type when passed in the options as a string', () => {
+  it('should show the accepted file type(s) when passed in as a string', () => {
     render(<FileDropzone options={{ accept: '.json' }} />);
 
     expect(screen.getByText('Accepted file type: .json')).toBeInTheDocument();
   });
 
-  it('should show accepted file types when passed in the options as a string array', () => {
+  it('should show an error message when the file size exceeds the max file size', async () => {
+    render(<FileDropzone options={{ maxSize: 1 }} />);
+
+    dispatchEvt(screen.getByTestId('dropzone'), 'drop', mockData(files));
+
+    expect(await screen.findByText('File is larger than 1 B')).toBeInTheDocument();
+  });
+
+  it('should show the accepted file type(s) when passed in as a array of strings', () => {
     render(<FileDropzone options={{ accept: ['.json', '.txt'] }} />);
 
     expect(screen.getByText('Accepted file types: .json, .txt')).toBeInTheDocument();
   });
 
+  it('should show the accepted file type(s) when passed in as an `Accept` object', () => {
+    render(<FileDropzone options={{ accept: { 'text/*': ['.json', '.txt'] } }} />);
+
+    expect(screen.getByText('Accepted file types: .json, .txt')).toBeInTheDocument();
+  });
+
   it('should handle file removal from the list', async () => {
+    const user = userEvent.setup();
     render(<FileDropzone />);
 
     dispatchEvt(screen.getByTestId('dropzone'), 'drop', mockData(files));
 
     expect(await screen.findAllByLabelText(REMOVE_FILE)).toHaveLength(3);
 
-    fireEvent.click(screen.getAllByLabelText(REMOVE_FILE)[0]);
+    await user.click(screen.getAllByLabelText(REMOVE_FILE)[0]);
 
     expect(await screen.findAllByLabelText(REMOVE_FILE)).toHaveLength(2);
   });
@@ -94,7 +110,7 @@ describe('The FileDropzone component', () => {
 
     expect(await screen.findByText('ping.json')).toBeInTheDocument();
     expect(fileReaderSpy).not.toBeCalled();
-    expect(onDrop).toBeCalledWith([fileToUpload], [], expect.anything());
+    expect(onDrop).toHaveBeenCalledWith([fileToUpload], [], expect.anything());
   });
 
   it('should show children inside the dropzone', () => {
@@ -105,7 +121,7 @@ describe('The FileDropzone component', () => {
     );
     render(component);
 
-    screen.getByText('Custom dropzone text');
+    expect(screen.getByText('Custom dropzone text')).toBeInTheDocument();
   });
 
   it('should handle file list overwrite when fileListRenderer is passed', async () => {
@@ -120,7 +136,7 @@ describe('The FileDropzone component', () => {
   });
 });
 
-function dispatchEvt(node: HTMLElement, type: string, data: any) {
+function dispatchEvt(node: HTMLElement, type: string, data: unknown) {
   const event = new Event(type, { bubbles: true });
   Object.assign(event, data);
   fireEvent(node, event);

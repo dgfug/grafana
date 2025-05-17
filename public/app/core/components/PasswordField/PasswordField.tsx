@@ -1,45 +1,39 @@
-import React, { FC, useState } from 'react';
+import { forwardRef, useState } from 'react';
+
 import { selectors } from '@grafana/e2e-selectors';
-
+import { useTranslate } from '@grafana/i18n';
 import { Input, IconButton } from '@grafana/ui';
+import { InputProps } from '@grafana/ui/internal';
 
-export interface Props {
-  autoFocus?: boolean;
-  autoComplete?: string;
-  id?: string;
-  passwordHint?: string;
-}
+interface Props extends Omit<InputProps, 'type'> {}
 
-export const PasswordField: FC<Props> = React.forwardRef<HTMLInputElement, Props>(
-  ({ autoComplete, autoFocus, id, passwordHint, ...props }, ref) => {
-    const [showPassword, setShowPassword] = useState(false);
-
-    return (
-      <Input
-        id={id}
-        autoFocus={autoFocus}
-        autoComplete={autoComplete}
-        {...props}
-        type={showPassword ? 'text' : 'password'}
-        placeholder={passwordHint}
-        aria-label={selectors.pages.Login.password}
-        ref={ref}
-        suffix={
-          <IconButton
-            name={showPassword ? 'eye-slash' : 'eye'}
-            type="button"
-            aria-controls={id}
-            role="switch"
-            aria-checked={showPassword}
-            aria-label="Show password"
-            onClick={() => {
-              setShowPassword(!showPassword);
-            }}
-          />
-        }
-      />
-    );
-  }
-);
+export const PasswordField = forwardRef<HTMLInputElement, Props>((props, ref) => {
+  const [showPassword, setShowPassword] = useState(false);
+  const { t } = useTranslate();
+  return (
+    <Input
+      {...props}
+      type={showPassword ? 'text' : 'password'}
+      data-testid={selectors.pages.Login.password}
+      ref={ref}
+      suffix={
+        <IconButton
+          name={showPassword ? 'eye-slash' : 'eye'}
+          aria-controls={props.id}
+          role="switch"
+          aria-checked={showPassword}
+          onClick={() => {
+            setShowPassword(!showPassword);
+          }}
+          tooltip={
+            showPassword
+              ? t('grafana-ui.password-field.tooltip-hide', 'Hide password')
+              : t('grafana-ui.password-field.tooltip-show', 'Show password')
+          }
+        />
+      }
+    />
+  );
+});
 
 PasswordField.displayName = 'PasswordField';

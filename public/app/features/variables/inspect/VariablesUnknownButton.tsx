@@ -1,16 +1,19 @@
-import React, { FC, useMemo } from 'react';
+import { useMemo } from 'react';
+
+import { useTranslate } from '@grafana/i18n';
 import { IconButton } from '@grafana/ui';
-import { UsagesToNetwork } from './utils';
+
 import { NetworkGraphModal } from './NetworkGraphModal';
+import { UsagesToNetwork } from './utils';
 
 interface Props {
   id: string;
   usages: UsagesToNetwork[];
 }
 
-export const VariablesUnknownButton: FC<Props> = ({ id, usages }) => {
+export const VariablesUnknownButton = ({ id, usages }: Props) => {
   const network = useMemo(() => usages.find((n) => n.variable.id === id), [id, usages]);
-
+  const { t } = useTranslate();
   if (!network) {
     return null;
   }
@@ -23,9 +26,23 @@ export const VariablesUnknownButton: FC<Props> = ({ id, usages }) => {
   });
 
   return (
-    <NetworkGraphModal show={false} title={`Showing usages for: $${id}`} nodes={nodes} edges={network.edges}>
+    <NetworkGraphModal
+      show={false}
+      title={t('variables.variables-unknown-button.usage-title', 'Showing usages for: {{variableId}}', {
+        variableId: `$${id}`,
+      })}
+      nodes={nodes}
+      edges={network.edges}
+    >
       {({ showModal }) => {
-        return <IconButton onClick={() => showModal()} name="code-branch" title="Show usages" />;
+        return (
+          <IconButton
+            onClick={() => showModal()}
+            name="code-branch"
+            tooltip={t('variables.variables-unknown-button.VariablesUnknownButton-tooltip-show-usages', 'Show usages')}
+            data-testid="VariablesUnknownButton"
+          />
+        );
       }}
     </NetworkGraphModal>
   );

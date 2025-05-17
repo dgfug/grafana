@@ -1,5 +1,3 @@
-import { PromAlertingRuleState } from 'app/types/unified-alerting-dto';
-
 export enum SortOrder {
   AlphaAsc = 1,
   AlphaDesc,
@@ -8,38 +6,38 @@ export enum SortOrder {
   TimeDesc,
 }
 
-export enum ShowOption {
-  Current = 'current',
-  RecentChanges = 'changes',
+export enum GroupMode {
+  Default = 'default',
+  Custom = 'custom',
 }
 
-export interface AlertListOptions {
-  showOptions: ShowOption;
-  maxItems: number;
-  sortOrder: SortOrder;
-  dashboardAlerts: boolean;
-  alertName: string;
-  dashboardTitle: string;
-  tags: string[];
-  stateFilter: {
-    ok: boolean;
-    paused: boolean;
-    no_data: boolean;
-    execution_error: boolean;
-    alerting: boolean;
-    pending: boolean;
-  };
-  folderId: number;
+export enum ViewMode {
+  List = 'list',
+  Stat = 'stat',
+}
+
+export interface StateFilter {
+  firing: boolean;
+  pending: boolean;
+  inactive?: boolean; // backwards compat
+  recovering: boolean;
+  noData: boolean;
+  normal: boolean;
+  error: boolean;
 }
 
 export interface UnifiedAlertListOptions {
   maxItems: number;
   sortOrder: SortOrder;
   dashboardAlerts: boolean;
+  groupMode: GroupMode;
+  groupBy: string[];
   alertName: string;
   showInstances: boolean;
-  folder: { id: number; title: string };
-  stateFilter: {
-    [K in PromAlertingRuleState]: boolean;
-  };
+  folder: { uid: string; title: string };
+  stateFilter: StateFilter;
+  alertInstanceLabelFilter: string;
+  datasource: string;
+  viewMode: ViewMode;
+  showInactiveAlerts: boolean;
 }

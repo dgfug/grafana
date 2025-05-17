@@ -36,8 +36,22 @@ export interface ThemeComponents {
     background: string;
     padding: number;
   };
+  drawer: {
+    padding: number;
+  };
+  textHighlight: {
+    background: string;
+    text: string;
+  };
   sidemenu: {
     width: number;
+  };
+  horizontalDrawer: {
+    defaultHeight: number;
+  };
+  table: {
+    rowHoverBackground: string;
+    rowSelected: string;
   };
 }
 
@@ -66,21 +80,39 @@ export function createComponents(colors: ThemeColors, shadows: ThemeShadows): Th
     input,
     panel,
     dropdown: {
-      background: input.background,
+      background: colors.background.elevated,
     },
     tooltip: {
-      background: colors.mode === 'light' ? '#555' : colors.background.secondary,
-      text: colors.mode === 'light' ? '#FFF' : colors.text.primary,
+      background: colors.background.elevated,
+      text: colors.text.primary,
     },
     dashboard: {
       background: colors.background.canvas,
       padding: 1,
     },
+    drawer: {
+      padding: 2,
+    },
     overlay: {
-      background: colors.mode === 'dark' ? 'rgba(0, 0, 0, 0.45)' : 'rgba(208, 209, 211, 0.24)',
+      background: colors.mode === 'dark' ? 'rgba(63, 62, 62, 0.5)' : 'rgba(208, 209, 211, 0.5)',
     },
     sidemenu: {
-      width: 48,
+      width: 57,
+    },
+    // @ts-expect-error (added here to not crash plugins that might use it)
+    menuTabs: {
+      height: 5,
+    },
+    textHighlight: {
+      text: colors.warning.contrastText,
+      background: colors.warning.main,
+    },
+    horizontalDrawer: {
+      defaultHeight: 400,
+    },
+    table: {
+      rowHoverBackground: colors.action.hover,
+      rowSelected: colors.action.selected,
     },
   };
 }

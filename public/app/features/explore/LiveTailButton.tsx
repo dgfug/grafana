@@ -1,6 +1,8 @@
-import React from 'react';
 import { css } from '@emotion/css';
+import { useRef } from 'react';
 import { CSSTransition } from 'react-transition-group';
+
+import { Trans, useTranslate } from '@grafana/i18n';
 import { Tooltip, ButtonGroup, ToolbarButton } from '@grafana/ui';
 
 type LiveTailButtonProps = {
@@ -14,14 +16,26 @@ type LiveTailButtonProps = {
 };
 
 export function LiveTailButton(props: LiveTailButtonProps) {
+  const transitionRef = useRef(null);
+  const { t } = useTranslate();
   const { start, pause, resume, isLive, isPaused, stop, splitted } = props;
-  const buttonVariant = isLive && !isPaused ? 'active' : 'default';
+  const buttonVariant = isLive && !isPaused ? 'active' : 'canvas';
   const onClickMain = isLive ? (isPaused ? resume : pause) : start;
 
   return (
     <ButtonGroup>
       <Tooltip
-        content={isLive && !isPaused ? <>Pause the live stream</> : <>Start live stream your logs</>}
+        content={
+          isLive && !isPaused ? (
+            <>
+              <Trans i18nKey="explore.live-tail-button.pause-the-live-stream">Pause the live stream</Trans>
+            </>
+          ) : (
+            <>
+              <Trans i18nKey="explore.live-tail-button.start-live-stream-your-logs">Start live stream your logs</Trans>
+            </>
+          )
+        }
         placement="bottom"
       >
         <ToolbarButton
@@ -30,7 +44,9 @@ export function LiveTailButton(props: LiveTailButtonProps) {
           icon={!isLive || isPaused ? 'play' : 'pause'}
           onClick={onClickMain}
         >
-          {isLive && isPaused ? 'Paused' : 'Live'}
+          {isLive && isPaused
+            ? t('explore.live-tail-button.paused', 'Paused')
+            : t('explore.live-tail-button.live', 'Live')}
         </ToolbarButton>
       </Tooltip>
 
@@ -45,9 +61,19 @@ export function LiveTailButton(props: LiveTailButtonProps) {
           exit: styles.stopButtonExit,
           exitActive: styles.stopButtonExitActive,
         }}
+        nodeRef={transitionRef}
       >
-        <Tooltip content={<>Stop and exit the live stream</>} placement="bottom">
-          <ToolbarButton variant={buttonVariant} onClick={stop} icon="square-shape" />
+        <Tooltip
+          content={
+            <>
+              <Trans i18nKey="explore.live-tail-button.stop-and-exit-the-live-stream">
+                Stop and exit the live stream
+              </Trans>
+            </>
+          }
+          placement="bottom"
+        >
+          <ToolbarButton ref={transitionRef} variant={buttonVariant} onClick={stop} icon="square-shape" />
         </Tooltip>
       </CSSTransition>
     </ButtonGroup>
@@ -55,26 +81,26 @@ export function LiveTailButton(props: LiveTailButtonProps) {
 }
 
 const styles = {
-  stopButtonEnter: css`
-    label: stopButtonEnter;
-    width: 0;
-    opacity: 0;
-    overflow: hidden;
-  `,
-  stopButtonEnterActive: css`
-    label: stopButtonEnterActive;
-    opacity: 1;
-    width: 32px;
-  `,
-  stopButtonExit: css`
-    label: stopButtonExit;
-    width: 32px;
-    opacity: 1;
-    overflow: hidden;
-  `,
-  stopButtonExitActive: css`
-    label: stopButtonExitActive;
-    opacity: 0;
-    width: 0;
-  `,
+  stopButtonEnter: css({
+    label: 'stopButtonEnter',
+    width: 0,
+    opacity: 0,
+    overflow: 'hidden',
+  }),
+  stopButtonEnterActive: css({
+    label: 'stopButtonEnterActive',
+    opacity: 1,
+    width: '32px',
+  }),
+  stopButtonExit: css({
+    label: 'stopButtonExit',
+    width: '32px',
+    opacity: 1,
+    overflow: 'hidden',
+  }),
+  stopButtonExitActive: css({
+    label: 'stopButtonExitActive',
+    opacity: 0,
+    width: 0,
+  }),
 };

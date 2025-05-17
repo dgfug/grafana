@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -14,43 +14,37 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/context/ctxhttp"
-
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/datasource"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/infra/httpclient"
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/plugins"
-	"github.com/grafana/grafana/pkg/plugins/backendplugin"
-	"github.com/grafana/grafana/pkg/plugins/backendplugin/coreplugin"
+	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/setting"
-	"github.com/opentracing/opentracing-go"
 )
 
+var logger = log.New("tsdb.graphite")
+
 type Service struct {
-	logger log.Logger
 	im     instancemgmt.InstanceManager
+	tracer tracing.Tracer
 }
 
-func ProvideService(httpClientProvider httpclient.Provider, manager backendplugin.Manager) (*Service, error) {
-	s := &Service{
-		logger: log.New("tsdb.graphite"),
+const (
+	TargetFullModelField = "targetFull"
+	TargetModelField     = "target"
+)
+
+func ProvideService(httpClientProvider httpclient.Provider, tracer tracing.Tracer) *Service {
+	return &Service{
 		im:     datasource.NewInstanceManager(newInstanceSettings(httpClientProvider)),
+		tracer: tracer,
 	}
-
-	factory := coreplugin.New(backend.ServeOpts{
-		QueryDataHandler: s,
-	})
-
-	if err := manager.Register("graphite", factory); err != nil {
-		s.logger.Error("Failed to register plugin", "error", err)
-		return nil, err
-	}
-
-	return s, nil
 }
 
 type datasourceInfo struct {
@@ -60,8 +54,8 @@ type datasourceInfo struct {
 }
 
 func newInstanceSettings(httpClientProvider httpclient.Provider) datasource.InstanceFactoryFunc {
-	return func(settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
-		opts, err := settings.HTTPClientOptions()
+	return func(ctx context.Context, settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
+		opts, err := settings.HTTPClientOptions(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -81,8 +75,8 @@ func newInstanceSettings(httpClientProvider httpclient.Provider) datasource.Inst
 	}
 }
 
-func (s *Service) getDSInfo(pluginCtx backend.PluginContext) (*datasourceInfo, error) {
-	i, err := s.im.Get(pluginCtx)
+func (s *Service) getDSInfo(ctx context.Context, pluginCtx backend.PluginContext) (*datasourceInfo, error) {
+	i, err := s.im.Get(ctx, pluginCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -95,133 +89,221 @@ func (s *Service) QueryData(ctx context.Context, req *backend.QueryDataRequest) 
 		return nil, fmt.Errorf("query contains no queries")
 	}
 
+	logger := logger.FromContext(ctx)
+
 	// get datasource info from context
-	dsInfo, err := s.getDSInfo(req.PluginContext)
+	dsInfo, err := s.getDSInfo(ctx, req.PluginContext)
 	if err != nil {
 		return nil, err
 	}
 
-	// take the first query in the request list, since all query should share the same timerange
-	q := req.Queries[0]
-
-	/*
-		graphite doc about from and until, with sdk we are getting absolute instead of relative time
-		https://graphite-api.readthedocs.io/en/latest/api.html#from-until
-	*/
-	from, until := epochMStoGraphiteTime(q.TimeRange)
-	formData := url.Values{
-		"from":          []string{from},
-		"until":         []string{until},
-		"format":        []string{"json"},
-		"maxDataPoints": []string{"500"},
-	}
-
-	// Calculate and get the last target of Graphite Request
-	var target string
-	emptyQueries := make([]string, 0)
+	emptyQueries := []string{}
+	graphiteQueries := map[string]struct {
+		req      *http.Request
+		formData url.Values
+	}{}
 	for _, query := range req.Queries {
-		model, err := simplejson.NewJson(query.JSON)
+		graphiteReq, formData, emptyQuery, err := s.createGraphiteRequest(ctx, query, logger, dsInfo)
 		if err != nil {
 			return nil, err
 		}
-		s.logger.Debug("graphite", "query", model)
-		currTarget := ""
-		if fullTarget, err := model.Get("targetFull").String(); err == nil {
-			currTarget = fullTarget
-		} else {
-			currTarget = model.Get("target").MustString()
-		}
-		if currTarget == "" {
-			s.logger.Debug("graphite", "empty query target", model)
-			emptyQueries = append(emptyQueries, fmt.Sprintf("Query: %v has no target", model))
+
+		if emptyQuery != nil {
+			emptyQueries = append(emptyQueries, fmt.Sprintf("Query: %v has no target", emptyQuery))
 			continue
 		}
-		target = fixIntervalFormat(currTarget)
+
+		graphiteQueries[query.RefID] = struct {
+			req      *http.Request
+			formData url.Values
+		}{
+			req:      graphiteReq,
+			formData: formData,
+		}
 	}
 
 	var result = backend.QueryDataResponse{}
-
-	if target == "" {
-		s.logger.Error("No targets in query model", "models without targets", strings.Join(emptyQueries, "\n"))
-		return &result, errors.New("no query target found for the alert rule")
+	if len(emptyQueries) != 0 {
+		logger.Warn("Found query models without targets", "models without targets", strings.Join(emptyQueries, "\n"))
+		// If no queries had a valid target, return an error; otherwise, attempt with the targets we have
+		if len(emptyQueries) == len(req.Queries) {
+			if result.Responses == nil {
+				result.Responses = make(map[string]backend.DataResponse)
+			}
+			// marking this downstream error as it is a user error, but arguably this is a plugin error
+			// since the plugin should have frontend validation that prevents us from getting into this state
+			missingQueryResponse := backend.ErrDataResponseWithSource(400, backend.ErrorSourceDownstream, "no query target found for the alert rule")
+			result.Responses["A"] = missingQueryResponse
+			return &result, nil
+		}
 	}
 
-	formData["target"] = []string{target}
+	frames := data.Frames{}
 
-	if setting.Env == setting.Dev {
-		s.logger.Debug("Graphite request", "params", formData)
-	}
+	for refId, graphiteReq := range graphiteQueries {
+		ctx, span := s.tracer.Start(ctx, "graphite query")
+		defer span.End()
+		targetStr := strings.Join(graphiteReq.formData["target"], ",")
+		span.SetAttributes(
+			attribute.String("refId", refId),
+			attribute.String("target", targetStr),
+			attribute.String("from", graphiteReq.formData["from"][0]),
+			attribute.String("until", graphiteReq.formData["until"][0]),
+			attribute.Int64("datasource_id", dsInfo.Id),
+			attribute.Int64("org_id", req.PluginContext.OrgID),
+		)
+		s.tracer.Inject(ctx, graphiteReq.req.Header, span)
+		res, err := dsInfo.HTTPClient.Do(graphiteReq.req)
+		if res != nil {
+			span.SetAttributes(attribute.Int("graphite.response.code", res.StatusCode))
+		}
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return &result, err
+		}
 
-	graphiteReq, err := s.createRequest(dsInfo, formData)
-	if err != nil {
-		return &result, err
-	}
+		defer func() {
+			err := res.Body.Close()
+			if err != nil {
+				logger.Warn("Failed to close response body", "error", err)
+			}
+		}()
 
-	span, ctx := opentracing.StartSpanFromContext(ctx, "graphite query")
-	span.SetTag("target", target)
-	span.SetTag("from", from)
-	span.SetTag("until", until)
-	span.SetTag("datasource_id", dsInfo.Id)
-	span.SetTag("org_id", req.PluginContext.OrgID)
+		queryFrames, err := s.toDataFrames(logger, res, refId)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return &result, err
+		}
 
-	defer span.Finish()
-
-	if err := opentracing.GlobalTracer().Inject(
-		span.Context(),
-		opentracing.HTTPHeaders,
-		opentracing.HTTPHeadersCarrier(graphiteReq.Header)); err != nil {
-		return &result, err
-	}
-
-	res, err := ctxhttp.Do(ctx, dsInfo.HTTPClient, graphiteReq)
-	if err != nil {
-		return &result, err
-	}
-
-	frames, err := s.toDataFrames(res)
-	if err != nil {
-		return &result, err
+		frames = append(frames, queryFrames...)
 	}
 
 	result = backend.QueryDataResponse{
 		Responses: make(backend.Responses),
 	}
 
-	result.Responses["A"] = backend.DataResponse{
-		Frames: frames,
+	for _, f := range frames {
+		if resp, ok := result.Responses[f.Name]; ok {
+			resp.Frames = append(resp.Frames, f)
+			result.Responses[f.Name] = resp
+		} else {
+			result.Responses[f.Name] = backend.DataResponse{
+				Frames: data.Frames{f},
+			}
+		}
 	}
 
 	return &result, nil
 }
 
-func (s *Service) parseResponse(res *http.Response) ([]TargetResponseDTO, error) {
-	body, err := ioutil.ReadAll(res.Body)
+// processQuery converts a Graphite data source query to a Graphite query target. It returns the target,
+// and the model if the target is invalid
+func (s *Service) processQuery(logger log.Logger, query backend.DataQuery) (string, *simplejson.Json, error) {
+	model, err := simplejson.NewJson(query.JSON)
+	if err != nil {
+		return "", nil, err
+	}
+	logger.Debug("Graphite", "query", model)
+	currTarget := ""
+	if fullTarget, err := model.Get(TargetFullModelField).String(); err == nil {
+		currTarget = fullTarget
+	} else {
+		currTarget = model.Get(TargetModelField).MustString()
+	}
+	if currTarget == "" {
+		logger.Debug("Graphite", "empty query target", model)
+		return "", model, nil
+	}
+	target := fixIntervalFormat(currTarget)
+
+	return target, nil, nil
+}
+
+func (s *Service) createRequest(ctx context.Context, l log.Logger, dsInfo *datasourceInfo, data url.Values) (*http.Request, error) {
+	u, err := url.Parse(dsInfo.URL)
+	if err != nil {
+		return nil, err
+	}
+	u.Path = path.Join(u.Path, "render")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(data.Encode()))
+	if err != nil {
+		logger.Info("Failed to create request", "error", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req, err
+}
+
+func (s *Service) createGraphiteRequest(ctx context.Context, query backend.DataQuery, logger log.Logger, dsInfo *datasourceInfo) (*http.Request, url.Values, *simplejson.Json, error) {
+	/*
+		graphite doc about from and until, with sdk we are getting absolute instead of relative time
+		https://graphite-api.readthedocs.io/en/latest/api.html#from-until
+	*/
+	from, until := epochMStoGraphiteTime(query.TimeRange)
+	formData := url.Values{
+		"from":          []string{from},
+		"until":         []string{until},
+		"format":        []string{"json"},
+		"maxDataPoints": []string{fmt.Sprintf("%d", query.MaxDataPoints)},
+		"target":        []string{},
+	}
+
+	target, emptyQuery, err := s.processQuery(logger, query)
+	if err != nil {
+		return nil, formData, nil, err
+	}
+
+	if emptyQuery != nil {
+		logger.Debug("Graphite", "empty query target", emptyQuery)
+		return nil, formData, emptyQuery, nil
+	}
+
+	formData["target"] = []string{target}
+
+	if setting.Env == setting.Dev {
+		logger.Debug("Graphite request", "params", formData)
+	}
+
+	graphiteReq, err := s.createRequest(ctx, logger, dsInfo, formData)
+	if err != nil {
+		return nil, formData, nil, err
+	}
+
+	return graphiteReq, formData, emptyQuery, nil
+}
+
+func (s *Service) parseResponse(logger log.Logger, res *http.Response) ([]TargetResponseDTO, error) {
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		if err := res.Body.Close(); err != nil {
-			s.logger.Warn("Failed to close response body", "err", err)
+			logger.Warn("Failed to close response body", "err", err)
 		}
 	}()
 
 	if res.StatusCode/100 != 2 {
-		s.logger.Info("Request failed", "status", res.Status, "body", string(body))
+		logger.Info("Request failed", "status", res.Status, "body", string(body))
 		return nil, fmt.Errorf("request failed, status: %s", res.Status)
 	}
 
 	var data []TargetResponseDTO
 	err = json.Unmarshal(body, &data)
 	if err != nil {
-		s.logger.Info("Failed to unmarshal graphite response", "error", err, "status", res.Status, "body", string(body))
+		logger.Info("Failed to unmarshal graphite response", "error", err, "status", res.Status, "body", string(body))
 		return nil, err
 	}
 
 	return data, nil
 }
 
-func (s *Service) toDataFrames(response *http.Response) (frames data.Frames, error error) {
-	responseData, err := s.parseResponse(response)
+func (s *Service) toDataFrames(logger log.Logger, response *http.Response, refId string) (frames data.Frames, error error) {
+	responseData, err := s.parseResponse(logger, response)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +312,6 @@ func (s *Service) toDataFrames(response *http.Response) (frames data.Frames, err
 	for _, series := range responseData {
 		timeVector := make([]time.Time, 0, len(series.DataPoints))
 		values := make([]*float64, 0, len(series.DataPoints))
-		name := series.Target
 
 		for _, dataPoint := range series.DataPoints {
 			var timestamp, value, err = parseDataTimePoint(dataPoint)
@@ -243,6 +324,9 @@ func (s *Service) toDataFrames(response *http.Response) (frames data.Frames, err
 
 		tags := make(map[string]string)
 		for name, value := range series.Tags {
+			if name == "name" {
+				value = series.Target
+			}
 			switch value := value.(type) {
 			case string:
 				tags[name] = value
@@ -251,32 +335,16 @@ func (s *Service) toDataFrames(response *http.Response) (frames data.Frames, err
 			}
 		}
 
-		frames = append(frames, data.NewFrame(name,
+		frames = append(frames, data.NewFrame(refId,
 			data.NewField("time", nil, timeVector),
-			data.NewField("value", tags, values).SetConfig(&data.FieldConfig{DisplayNameFromDS: name})))
+			data.NewField("value", tags, values).SetConfig(&data.FieldConfig{DisplayNameFromDS: series.Target})).SetMeta(
+			&data.FrameMeta{Type: data.FrameTypeTimeSeriesMulti}))
 
 		if setting.Env == setting.Dev {
-			s.logger.Debug("Graphite response", "target", series.Target, "datapoints", len(series.DataPoints))
+			logger.Debug("Graphite response", "target", series.Target, "datapoints", len(series.DataPoints))
 		}
 	}
 	return frames, nil
-}
-
-func (s *Service) createRequest(dsInfo *datasourceInfo, data url.Values) (*http.Request, error) {
-	u, err := url.Parse(dsInfo.URL)
-	if err != nil {
-		return nil, err
-	}
-	u.Path = path.Join(u.Path, "render")
-
-	req, err := http.NewRequest(http.MethodPost, u.String(), strings.NewReader(data.Encode()))
-	if err != nil {
-		s.logger.Info("Failed to create request", "error", err)
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return req, err
 }
 
 func fixIntervalFormat(target string) string {
@@ -298,7 +366,7 @@ func epochMStoGraphiteTime(tr backend.TimeRange) (string, string) {
 /**
  * Graphite should always return timestamp as a number but values might be nil when data is missing
  */
-func parseDataTimePoint(dataTimePoint plugins.DataTimePoint) (time.Time, *float64, error) {
+func parseDataTimePoint(dataTimePoint DataTimePoint) (time.Time, *float64, error) {
 	if !dataTimePoint[1].Valid {
 		return time.Time{}, nil, errors.New("failed to parse data point timestamp")
 	}
