@@ -1,21 +1,13 @@
 import { ComponentType } from 'react';
 import { Reducer } from 'redux';
-import { Registry, UrlQueryValue, VariableType } from '@grafana/data';
 
-import { VariableModel, VariableOption } from './types';
+import { Registry, TypedVariableModel, UrlQueryValue, VariableOption, VariableType } from '@grafana/data';
+
 import { VariableEditorProps } from './editor/types';
 import { VariablePickerProps } from './pickers/types';
-import { createQueryVariableAdapter } from './query/adapter';
-import { createCustomVariableAdapter } from './custom/adapter';
-import { createTextBoxVariableAdapter } from './textbox/adapter';
-import { createConstantVariableAdapter } from './constant/adapter';
-import { createDataSourceVariableAdapter } from './datasource/adapter';
-import { createIntervalVariableAdapter } from './interval/adapter';
-import { createAdHocVariableAdapter } from './adhoc/adapter';
-import { createSystemVariableAdapter } from './system/adapter';
 import { VariablesState } from './state/types';
 
-export interface VariableAdapter<Model extends VariableModel> {
+export interface VariableAdapter<Model extends TypedVariableModel> {
   id: VariableType;
   description: string;
   name: string;
@@ -31,16 +23,5 @@ export interface VariableAdapter<Model extends VariableModel> {
   reducer: Reducer<VariablesState>;
   beforeAdding?: (model: any) => any;
 }
-
-export const getDefaultVariableAdapters = () => [
-  createQueryVariableAdapter(),
-  createCustomVariableAdapter(),
-  createTextBoxVariableAdapter(),
-  createConstantVariableAdapter(),
-  createDataSourceVariableAdapter(),
-  createIntervalVariableAdapter(),
-  createAdHocVariableAdapter(),
-  createSystemVariableAdapter(),
-];
 
 export const variableAdapters = new Registry<VariableAdapter<any>>();

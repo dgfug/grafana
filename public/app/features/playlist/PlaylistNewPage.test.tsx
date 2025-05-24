@@ -1,57 +1,47 @@
-import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { of } from 'rxjs';
+import { TestProvider } from 'test/helpers/TestProvider';
 
-import { Playlist } from './types';
-import { PlaylistNewPage } from './PlaylistNewPage';
-import { backendSrv } from '../../core/services/backend_srv';
+import { selectors } from '@grafana/e2e-selectors';
 import { locationService } from '@grafana/runtime';
 
-jest.mock('./usePlaylist', () => ({
-  // so we don't need to add dashboard items in test
-  usePlaylist: jest.fn().mockReturnValue({
-    playlist: { items: [{ title: 'First item', type: 'dashboard_by_id', order: 1, value: '1' }], loading: false },
-  }),
-}));
+import { createFetchResponse } from '../../../test/helpers/createFetchResponse';
+import { backendSrv } from '../../core/services/backend_srv';
+
+import { PlaylistNewPage } from './PlaylistNewPage';
 
 jest.mock('@grafana/runtime', () => ({
-  ...(jest.requireActual('@grafana/runtime') as any),
+  ...jest.requireActual('@grafana/runtime'),
   getBackendSrv: () => backendSrv,
 }));
 
-function getTestContext({ name, interval, items }: Partial<Playlist> = {}) {
+jest.mock('app/core/components/TagFilter/TagFilter', () => ({
+  TagFilter: () => {
+    return <>mocked-tag-filter</>;
+  },
+}));
+
+function getTestContext() {
   jest.clearAllMocks();
-  const playlist = ({ name, items, interval } as unknown) as Playlist;
-  const queryParams = {};
-  const route: any = {};
-  const match: any = {};
-  const location: any = {};
-  const history: any = {};
-  const navModel: any = {
-    node: {},
-    main: {},
-  };
-  const backendSrvMock = jest.spyOn(backendSrv, 'post');
+  const backendSrvMock = jest.spyOn(backendSrv, 'fetch').mockImplementation(() => of(createFetchResponse({})));
+  jest.spyOn(backendSrv, 'search').mockResolvedValue([]);
+
   const { rerender } = render(
-    <PlaylistNewPage
-      queryParams={queryParams}
-      route={route}
-      match={match}
-      location={location}
-      history={history}
-      navModel={navModel}
-    />
+    <TestProvider>
+      <PlaylistNewPage />
+    </TestProvider>
   );
 
-  return { playlist, rerender, backendSrvMock };
+  return { rerender, backendSrvMock };
 }
 
 describe('PlaylistNewPage', () => {
   describe('when mounted', () => {
-    it('then header should be correct', () => {
+    it('then header should be correct', async () => {
       getTestContext();
 
-      expect(screen.getByRole('heading', { name: /new playlist/i })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: /new playlist/i })).toBeInTheDocument();
     });
   });
 
@@ -60,15 +50,24 @@ describe('PlaylistNewPage', () => {
       const { backendSrvMock } = getTestContext();
 
       expect(locationService.getLocation().pathname).toEqual('/');
-      userEvent.type(screen.getByRole('textbox', { name: /playlist name/i }), 'A Name');
+
+      await userEvent.type(screen.getByRole('textbox', { name: selectors.pages.PlaylistForm.name }), 'A new name');
       fireEvent.submit(screen.getByRole('button', { name: /save/i }));
       await waitFor(() => expect(backendSrvMock).toHaveBeenCalledTimes(1));
-      expect(backendSrvMock).toHaveBeenCalledWith('/api/playlists', {
-        name: 'A Name',
-        interval: '5m',
-        items: [{ title: 'First item', type: 'dashboard_by_id', order: 1, value: '1' }],
+      expect(backendSrvMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            spec: {
+              title: 'A new name',
+              interval: '5m',
+              items: [],
+            },
+          }),
+        })
+      );
+      await waitFor(() => {
+        expect(locationService.getLocation().pathname).toEqual('/playlists');
       });
-      expect(locationService.getLocation().pathname).toEqual('/playlists');
     });
   });
 });

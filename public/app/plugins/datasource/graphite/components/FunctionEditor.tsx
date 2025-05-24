@@ -1,9 +1,12 @@
-import React, { useRef } from 'react';
-import { PopoverController, Popover, ClickOutsideWrapper, Icon, Tooltip, useStyles2 } from '@grafana/ui';
-import { FunctionEditorControls, FunctionEditorControlsProps } from './FunctionEditorControls';
-import { FuncInstance } from '../gfunc';
 import { css } from '@emotion/css';
+import { memo } from 'react';
+
 import { GrafanaTheme2 } from '@grafana/data';
+import { Icon, Tooltip, useStyles2, type PopoverContent } from '@grafana/ui';
+
+import { FuncInstance } from '../gfunc';
+
+import { FunctionEditorControls, FunctionEditorControlsProps } from './FunctionEditorControls';
 
 interface FunctionEditorProps extends FunctionEditorControlsProps {
   func: FuncInstance;
@@ -11,78 +14,51 @@ interface FunctionEditorProps extends FunctionEditorControlsProps {
 
 const getStyles = (theme: GrafanaTheme2) => {
   return {
-    icon: css`
-      margin-right: ${theme.spacing(0.5)};
-    `,
+    icon: css({
+      marginRight: theme.spacing(0.5),
+    }),
     label: css({
       fontWeight: theme.typography.fontWeightMedium,
-      fontSize: theme.typography.bodySmall.fontSize, // to match .gf-form-label
+      fontSize: theme.typography.bodySmall.fontSize,
       cursor: 'pointer',
       display: 'inline-block',
-      paddingBottom: '2px',
     }),
   };
 };
 
-const FunctionEditor: React.FC<FunctionEditorProps> = ({ onMoveLeft, onMoveRight, func, ...props }) => {
-  const triggerRef = useRef<HTMLSpanElement>(null);
+const FunctionEditor = ({ onMoveLeft, onMoveRight, func, ...props }: FunctionEditorProps) => {
   const styles = useStyles2(getStyles);
 
-  const renderContent = ({ updatePopperPosition }: any) => (
+  const renderContent: PopoverContent = ({ updatePopperPosition }) => (
     <FunctionEditorControls
       {...props}
       func={func}
       onMoveLeft={() => {
         onMoveLeft(func);
-        updatePopperPosition();
+        updatePopperPosition?.();
       }}
       onMoveRight={() => {
         onMoveRight(func);
-        updatePopperPosition();
+        updatePopperPosition?.();
       }}
     />
   );
 
   return (
-    <PopoverController content={renderContent} placement="top" hideAfter={100}>
-      {(showPopper, hidePopper, popperProps) => {
-        return (
-          <>
-            {triggerRef.current && (
-              <Popover
-                {...popperProps}
-                referenceElement={triggerRef.current}
-                wrapperClassName="popper"
-                className="popper__background"
-                renderArrow={({ arrowProps, placement }) => (
-                  <div className="popper__arrow" data-placement={placement} {...arrowProps} />
-                )}
-              />
-            )}
-            <ClickOutsideWrapper
-              onClick={() => {
-                if (popperProps.show) {
-                  hidePopper();
-                }
-              }}
-            >
-              <span ref={triggerRef} onClick={popperProps.show ? hidePopper : showPopper} className={styles.label}>
-                {func.def.unknown && (
-                  <Tooltip content={<TooltipContent />} placement="bottom">
-                    <Icon data-testid="warning-icon" name="exclamation-triangle" size="xs" className={styles.icon} />
-                  </Tooltip>
-                )}
-                {func.def.name}
-              </span>
-            </ClickOutsideWrapper>
-          </>
-        );
-      }}
-    </PopoverController>
+    <>
+      {func.def.unknown && (
+        <Tooltip content={<TooltipContent />} placement="bottom" interactive>
+          <Icon data-testid="warning-icon" name="exclamation-triangle" size="xs" className={styles.icon} />
+        </Tooltip>
+      )}
+      <Tooltip content={renderContent} placement="top" interactive>
+        <span className={styles.label}>{func.def.name}</span>
+      </Tooltip>
+    </>
   );
 };
 
-const TooltipContent = React.memo(() => {
+const TooltipContent = memo(() => {
   return (
     <span>
       This function is not supported. Check your function for typos and{' '}

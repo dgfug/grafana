@@ -1,47 +1,56 @@
-import React, { FC } from 'react';
-import { escapeStringForRegex, unEscapeStringFromRegex } from '@grafana/data';
-import { Button, Icon, Input } from '..';
-import { useFocus } from '../Input/utils';
+import { forwardRef, useRef, HTMLProps } from 'react';
 
-export interface Props {
+import { escapeStringForRegex, unEscapeStringFromRegex } from '@grafana/data';
+
+import { Trans } from '../../utils/i18n';
+import { useCombinedRefs } from '../../utils/useCombinedRefs';
+import { Button } from '../Button';
+import { Icon } from '../Icon/Icon';
+import { Input } from '../Input/Input';
+
+export interface Props extends Omit<HTMLProps<HTMLInputElement>, 'onChange'> {
   value: string | undefined;
-  placeholder?: string;
   width?: number;
   onChange: (value: string) => void;
-  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-  autoFocus?: boolean;
+  escapeRegex?: boolean;
 }
 
-export const FilterInput: FC<Props> = ({ value, placeholder, width, onChange, onKeyDown, autoFocus }) => {
-  const [inputRef, setInputFocus] = useFocus();
-  const suffix =
-    value !== '' ? (
-      <Button
-        icon="times"
-        fill="text"
-        size="sm"
-        onClick={(e) => {
-          setInputFocus();
-          onChange('');
-          e.stopPropagation();
-        }}
-      >
-        Clear
-      </Button>
-    ) : null;
+export const FilterInput = forwardRef<HTMLInputElement, Props>(
+  ({ value, width, onChange, escapeRegex = true, ...restProps }, ref) => {
+    const innerRef = useRef<HTMLInputElement | null>(null);
+    const combinedRef = useCombinedRefs<HTMLInputElement>(ref, innerRef);
 
-  return (
-    <Input
-      autoFocus={autoFocus ?? false}
-      prefix={<Icon name="search" />}
-      ref={inputRef}
-      suffix={suffix}
-      width={width}
-      type="text"
-      value={value ? unEscapeStringFromRegex(value) : ''}
-      onChange={(event) => onChange(escapeStringForRegex(event.currentTarget.value))}
-      onKeyDown={onKeyDown}
-      placeholder={placeholder}
-    />
-  );
-};
+    const suffix =
+      value !== '' ? (
+        <Button
+          icon="times"
+          fill="text"
+          size="sm"
+          onClick={(e) => {
+            innerRef.current?.focus();
+            onChange('');
+            e.stopPropagation();
+          }}
+        >
+          <Trans i18nKey="grafana-ui.filter-input.clear">Clear</Trans>
+        </Button>
+      ) : null;
+
+    return (
+      <Input
+        prefix={<Icon name="search" />}
+        suffix={suffix}
+        width={width}
+        type="text"
+        value={escapeRegex ? unEscapeStringFromRegex(value ?? '') : value}
+        onChange={(event) =>
+          onChange(escapeRegex ? escapeStringForRegex(event.currentTarget.value) : event.currentTarget.value)
+        }
+        {...restProps}
+        ref={combinedRef}
+      />
+    );
+  }
+);
+
+FilterInput.displayName = 'FilterInput';

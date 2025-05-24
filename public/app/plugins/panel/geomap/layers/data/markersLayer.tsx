@@ -1,51 +1,39 @@
-import React, { ReactNode } from 'react';
+import Map from 'ol/Map';
+import { Point } from 'ol/geom';
+import { VectorImage } from 'ol/layer';
+import LayerGroup from 'ol/layer/Group';
+import WebGLPointsLayer from 'ol/layer/WebGLPoints.js';
+import { ReactNode } from 'react';
+import { ReplaySubject } from 'rxjs';
+import tinycolor from 'tinycolor2';
+
 import {
   MapLayerRegistryItem,
   MapLayerOptions,
   PanelData,
   GrafanaTheme2,
   FrameGeometrySourceMode,
+  EventBus,
 } from '@grafana/data';
-import Map from 'ol/Map';
-import Feature from 'ol/Feature';
-import { Point } from 'ol/geom';
-import * as layer from 'ol/layer';
-import * as source from 'ol/source';
+import { FrameVectorSource } from 'app/features/geo/utils/frameVectorSource';
+import { getLocationMatchers } from 'app/features/geo/utils/location';
 
-import tinycolor from 'tinycolor2';
-import { dataFrameToPoints, getLocationMatchers } from '../../utils/location';
-import {
-  ColorDimensionConfig,
-  ScaleDimensionConfig,
-  getScaledDimension,
-  getColorDimension,
-} from 'app/features/dimensions';
-import { ScaleDimensionEditor, ColorDimensionEditor } from 'app/features/dimensions/editors';
+import { MarkersLegend, MarkersLegendProps } from '../../components/MarkersLegend';
 import { ObservablePropsWrapper } from '../../components/ObservablePropsWrapper';
-import { MarkersLegend, MarkersLegendProps } from './MarkersLegend';
-import { circleMarker, markerMakers } from '../../utils/regularShapes';
-import { ReplaySubject } from 'rxjs';
+import { StyleEditor } from '../../editor/StyleEditor';
+import { getWebGLStyle, textMarker } from '../../style/markers';
+import { DEFAULT_SIZE, defaultStyleConfig, StyleConfig } from '../../style/types';
+import { getDisplacement, getRGBValues, getStyleConfigState, styleUsesText } from '../../style/utils';
+import { getStyleDimension } from '../../utils/utils';
 
 // Configuration options for Circle overlays
 export interface MarkersConfig {
-  size: ScaleDimensionConfig;
-  color: ColorDimensionConfig;
-  fillOpacity: number;
-  shape?: string;
+  style: StyleConfig;
   showLegend?: boolean;
 }
 
 const defaultOptions: MarkersConfig = {
-  size: {
-    fixed: 5,
-    min: 2,
-    max: 15,
-  },
-  color: {
-    fixed: 'dark-green', // picked from theme
-  },
-  fillOpacity: 0.4,
-  shape: 'circle',
+  style: defaultStyleConfig,
   showLegend: true,
 };
 
@@ -54,10 +42,12 @@ export const MARKERS_LAYER_ID = 'markers';
 // Used by default when nothing is configured
 export const defaultMarkersConfig: MapLayerOptions<MarkersConfig> = {
   type: MARKERS_LAYER_ID,
+  name: '', // will get replaced
   config: defaultOptions,
   location: {
     mode: FrameGeometrySourceMode.Auto,
   },
+  tooltip: true,
 };
 
 /**
@@ -66,142 +56,164 @@ export const defaultMarkersConfig: MapLayerOptions<MarkersConfig> = {
 export const markersLayer: MapLayerRegistryItem<MarkersConfig> = {
   id: MARKERS_LAYER_ID,
   name: 'Markers',
-  description: 'use markers to render each data point',
+  description: 'Use markers to render each data point',
   isBaseMap: false,
   showLocation: true,
+  hideOpacity: true,
 
   /**
    * Function that configures transformation and returns a transformer
+   * @param map
    * @param options
+   * @param theme
    */
-  create: async (map: Map, options: MapLayerOptions<MarkersConfig>, theme: GrafanaTheme2) => {
-    const matchers = await getLocationMatchers(options.location);
-    const vectorLayer = new layer.Vector({});
+  create: async (map: Map, options: MapLayerOptions<MarkersConfig>, eventBus: EventBus, theme: GrafanaTheme2) => {
     // Assert default values
     const config = {
       ...defaultOptions,
       ...options?.config,
     };
 
+    const style = await getStyleConfigState(config.style);
+    const symbol = config.style.symbol?.fixed;
+    const webGLStyle = await getWebGLStyle(symbol, config.style.opacity);
+    const hasText = styleUsesText(config.style);
+    const location = await getLocationMatchers(options.location);
+    const source = new FrameVectorSource<Point>(location);
+    const symbolLayer = new WebGLPointsLayer({ source, style: webGLStyle });
+    const vectorLayer = new VectorImage({ source, declutter: true });
+    // Initialize hasVector with just text check, will be updated when features are available
+    let hasVector = hasText;
+
+    const layers = new LayerGroup({
+      // If text and no symbol, only show text - fall back on default symbol
+      layers: hasVector && symbol ? [symbolLayer, vectorLayer] : hasVector && !symbol ? [vectorLayer] : [symbolLayer],
+    });
+
     const legendProps = new ReplaySubject<MarkersLegendProps>(1);
     let legend: ReactNode = null;
     if (config.showLegend) {
       legend = <ObservablePropsWrapper watch={legendProps} initialSubProps={{}} child={MarkersLegend} />;
     }
-    const shape = markerMakers.getIfExists(config.shape) ?? circleMarker;
 
     return {
-      init: () => vectorLayer,
+      init: () => layers,
       legend: legend,
       update: (data: PanelData) => {
         if (!data.series?.length) {
+          source.clear();
           return; // ignore empty
         }
 
-        const features: Feature<Point>[] = [];
-
         for (const frame of data.series) {
-          const info = dataFrameToPoints(frame, matchers);
-          if (info.warning) {
-            console.log('Could not find locations', info.warning);
-            continue; // ???
-          }
-
-          const colorDim = getColorDimension(frame, config.color, theme);
-          const sizeDim = getScaledDimension(frame, config.size);
-          const opacity = options.config?.fillOpacity ?? defaultOptions.fillOpacity;
-
-          // Map each data value into new points
-          for (let i = 0; i < frame.length; i++) {
-            // Get the circle color for a specific data value depending on color scheme
-            const color = colorDim.get(i);
-            // Set the opacity determined from user configuration
-            const fillColor = tinycolor(color).setAlpha(opacity).toRgbString();
-            // Get circle size from user configuration
-            const radius = sizeDim.get(i);
-
-            // Create a new Feature for each point returned from dataFrameToPoints
-            const dot = new Feature(info.points[i]);
-            dot.setProperties({
-              frame,
-              rowIndex: i,
-            });
-
-            dot.setStyle(shape!.make(color, fillColor, radius));
-            features.push(dot);
-          }
+          style.dims = getStyleDimension(frame, style, theme);
 
           // Post updates to the legend component
           if (legend) {
             legendProps.next({
-              color: colorDim,
-              size: sizeDim,
+              styleConfig: style,
+              size: style.dims?.size,
+              layerName: options.name,
+              layer: symbolLayer,
             });
           }
+
+          source.update(frame);
+
+          // Track if we find any line strings during feature processing
+          let hasLineString = false;
+
+          source.forEachFeature((feature) => {
+            const isLineString = feature.getGeometry()?.getType() === 'LineString';
+            if (isLineString) {
+              hasLineString = true;
+            }
+            const idx: number = feature.get('rowIndex');
+            const dims = style.dims;
+            const values = { ...style.base };
+
+            if (dims?.color) {
+              values.color = dims.color.get(idx);
+            }
+            if (dims?.size) {
+              values.size = dims.size.get(idx);
+            }
+            if (dims?.text) {
+              values.text = dims.text.get(idx);
+            }
+            if (dims?.rotation) {
+              values.rotation = dims.rotation.get(idx);
+            }
+            if (!isLineString) {
+              const colorString = tinycolor(theme.visualization.getColorByName(values.color)).toString();
+              const colorValues = getRGBValues(colorString);
+
+              const radius = values.size ?? DEFAULT_SIZE;
+              const displacement = getDisplacement(values.symbolAlign ?? defaultStyleConfig.symbolAlign, radius);
+
+              // WebGLPointsLayer uses style expressions instead of style functions
+              feature.setProperties({ red: colorValues?.r ?? 255 });
+              feature.setProperties({ green: colorValues?.g ?? 255 });
+              feature.setProperties({ blue: colorValues?.b ?? 255 });
+              feature.setProperties({ size: (values.size ?? 1) * 2 }); // TODO unify sizing across all source types
+              feature.setProperties({ rotation: ((values.rotation ?? 0) * Math.PI) / 180 });
+              feature.setProperties({ opacity: (values.opacity ?? 1) * (colorValues?.a ?? 1) });
+              feature.setProperties({ offsetX: displacement[0] });
+              feature.setProperties({ offsetY: displacement[1] });
+            }
+
+            // Set style to be used by VectorLayer (text only)
+            if (hasText) {
+              const textStyle = textMarker(values);
+              feature.setStyle(textStyle);
+            }
+
+            // Set style to be used by LineString
+            if (isLineString) {
+              const lineStringStyle = style.maker(values);
+              feature.setStyle(lineStringStyle);
+            }
+          });
+
+          // Update hasVector state after processing all features
+          hasVector = hasText || hasLineString;
+
+          // Update layer visibility based on current hasVector state
+          const layersArray = layers.getLayers();
+          layersArray.clear();
+          if (hasVector && symbol) {
+            layersArray.extend([symbolLayer, vectorLayer]);
+          } else if (hasVector && !symbol) {
+            layersArray.extend([vectorLayer]);
+          } else {
+            layersArray.extend([symbolLayer]);
+          }
+
           break; // Only the first frame for now!
         }
+      },
 
-        // Source reads the data and provides a set of features to visualize
-        const vectorSource = new source.Vector({ features });
-        vectorLayer.setSource(vectorSource);
+      // Marker overlay options
+      registerOptionsUI: (builder) => {
+        builder
+          .addCustomEditor({
+            id: 'config.style',
+            path: 'config.style',
+            name: 'Styles',
+            editor: StyleEditor,
+            settings: {
+              displayRotation: true,
+            },
+            defaultValue: defaultOptions.style,
+          })
+          .addBooleanSwitch({
+            path: 'config.showLegend',
+            name: 'Show legend',
+            description: 'Show map legend',
+            defaultValue: defaultOptions.showLegend,
+          });
       },
     };
-  },
-  // Marker overlay options
-  registerOptionsUI: (builder) => {
-    builder
-      .addCustomEditor({
-        id: 'config.color',
-        path: 'config.color',
-        name: 'Marker Color',
-        editor: ColorDimensionEditor,
-        settings: {},
-        defaultValue: {
-          // Configured values
-          fixed: 'grey',
-        },
-      })
-      .addCustomEditor({
-        id: 'config.size',
-        path: 'config.size',
-        name: 'Marker Size',
-        editor: ScaleDimensionEditor,
-        settings: {
-          min: 1,
-          max: 100, // possible in the UI
-        },
-        defaultValue: {
-          // Configured values
-          fixed: 5,
-          min: 1,
-          max: 20,
-        },
-      })
-      .addSelect({
-        path: 'config.shape',
-        name: 'Marker Shape',
-        settings: {
-          options: markerMakers.selectOptions().options,
-        },
-        defaultValue: 'circle',
-      })
-      .addSliderInput({
-        path: 'config.fillOpacity',
-        name: 'Fill opacity',
-        defaultValue: defaultOptions.fillOpacity,
-        settings: {
-          min: 0,
-          max: 1,
-          step: 0.1,
-        },
-        showIf: (cfg) => markerMakers.getIfExists((cfg as any).config?.shape)?.hasFill,
-      })
-      .addBooleanSwitch({
-        path: 'config.showLegend',
-        name: 'Show legend',
-        description: 'Show legend',
-        defaultValue: defaultOptions.showLegend,
-      });
   },
 
   // fill in the default values

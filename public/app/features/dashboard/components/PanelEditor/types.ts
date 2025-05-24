@@ -1,5 +1,7 @@
 import { DataFrame, FieldConfigSource, PanelData, PanelPlugin } from '@grafana/data';
-import { DashboardModel, PanelModel } from '../../state';
+
+import { DashboardModel } from '../../state/DashboardModel';
+import { PanelModel } from '../../state/PanelModel';
 
 export interface PanelEditorTab {
   id: string;
@@ -54,8 +56,21 @@ export interface OptionPaneRenderProps {
   plugin: PanelPlugin;
   data?: PanelData;
   dashboard: DashboardModel;
-  instanceState: any;
-  onPanelConfigChange: (configKey: keyof PanelModel, value: any) => void;
-  onPanelOptionsChanged: (options: any) => void;
+  instanceState: unknown;
+  onPanelConfigChange: <T extends keyof PanelModel>(configKey: T, value: PanelModel[T]) => void;
+  onPanelOptionsChanged: (options: PanelModel['options']) => void;
   onFieldConfigsChange: (config: FieldConfigSource) => void;
+}
+
+export interface OptionPaneItemOverrideInfo {
+  type: 'data' | 'rule';
+  onClick?: () => void;
+  tooltip: string;
+  description: string;
+}
+
+export enum VisualizationSelectPaneTab {
+  Visualizations,
+  LibraryPanels,
+  Suggestions,
 }

@@ -1,9 +1,11 @@
-import React from 'react';
 import { css } from '@emotion/css';
+import * as React from 'react';
+
 import { GrafanaTheme2 } from '@grafana/data';
+
 import { useStyles2 } from '../../themes';
-import { InlineLabel } from '../Forms/InlineLabel';
 import { InlineFieldRow } from '../Forms/InlineFieldRow';
+import { InlineLabel } from '../Forms/InlineLabel';
 
 /**
  * Horizontal section for editor components.
@@ -12,11 +14,14 @@ import { InlineFieldRow } from '../Forms/InlineFieldRow';
  */
 export const SegmentSection = ({
   label,
+  htmlFor,
   children,
   fill,
 }: {
   // Name of the section
   label: string;
+  // htmlFor for the label
+  htmlFor?: string;
   // List of components in the section
   children: React.ReactNode;
   // Fill the space at the end
@@ -26,7 +31,7 @@ export const SegmentSection = ({
   return (
     <>
       <InlineFieldRow>
-        <InlineLabel width={12} className={styles.label}>
+        <InlineLabel htmlFor={htmlFor} width={12} className={styles.label}>
           {label}
         </InlineLabel>
         {children}
@@ -41,11 +46,11 @@ export const SegmentSection = ({
 };
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  label: css`
-    color: ${theme.colors.primary.text};
-  `,
-  fill: css`
-    flex-grow: 1;
-    margin-bottom: ${theme.spacing(0.5)};
-  `,
+  label: css({
+    color: theme.colors.primary.text,
+  }),
+  fill: css({
+    flexGrow: 1,
+    marginBottom: theme.spacing(0.5),
+  }),
 });

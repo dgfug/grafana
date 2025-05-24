@@ -1,17 +1,18 @@
-import React from 'react';
+import * as React from 'react';
 
-import { InlineField } from '../..';
-import { HttpSettingsProps } from './types';
+import { InlineField } from '../../components/Forms/InlineField';
+import { t } from '../../utils/i18n';
 import { FormField } from '../FormField/FormField';
 import { SecretFormField } from '../SecretFormField/SecretFormField';
 
-export const BasicAuthSettings: React.FC<HttpSettingsProps> = ({ dataSourceConfig, onChange }) => {
+import { HttpSettingsProps } from './types';
+
+export const BasicAuthSettings = ({ dataSourceConfig, onChange }: HttpSettingsProps) => {
   const password = dataSourceConfig.secureJsonData ? dataSourceConfig.secureJsonData.basicAuthPassword : '';
 
   const onPasswordReset = () => {
     onChange({
       ...dataSourceConfig,
-      basicAuthPassword: '',
       secureJsonData: {
         ...dataSourceConfig.secureJsonData,
         basicAuthPassword: '',
@@ -35,22 +36,19 @@ export const BasicAuthSettings: React.FC<HttpSettingsProps> = ({ dataSourceConfi
 
   return (
     <>
-      <InlineField>
+      <InlineField disabled={dataSourceConfig.readOnly}>
         <FormField
-          label="User"
+          label={t('grafana-ui.data-source-basic-auth-settings.user-label', 'User')}
           labelWidth={10}
           inputWidth={18}
-          placeholder="user"
+          placeholder={t('grafana-ui.data-source-basic-auth-settings.user-placeholder', 'user')}
           value={dataSourceConfig.basicAuthUser}
           onChange={(event) => onChange({ ...dataSourceConfig, basicAuthUser: event.currentTarget.value })}
         />
       </InlineField>
-      <InlineField>
+      <InlineField disabled={dataSourceConfig.readOnly}>
         <SecretFormField
-          isConfigured={
-            !!dataSourceConfig.basicAuthPassword ||
-            !!(dataSourceConfig.secureJsonFields && dataSourceConfig.secureJsonFields.basicAuthPassword)
-          }
+          isConfigured={!!(dataSourceConfig.secureJsonFields && dataSourceConfig.secureJsonFields.basicAuthPassword)}
           value={password || ''}
           inputWidth={18}
           labelWidth={10}

@@ -26,7 +26,7 @@ import (
 	"sync"
 
 	"github.com/grafana/grafana/pkg/infra/log"
-	"gopkg.in/macaron.v1"
+	"github.com/grafana/grafana/pkg/web"
 )
 
 var Root string
@@ -39,7 +39,7 @@ func init() {
 	}
 }
 
-// StaticOptions is a struct for specifying configuration options for the macaron.Static middleware.
+// StaticOptions is a struct for specifying configuration options for the web.Static middleware.
 type StaticOptions struct {
 	// Prefix is the optional prefix used to serve the static directory content
 	Prefix string
@@ -49,9 +49,11 @@ type StaticOptions struct {
 	IndexFile string
 	// Expires defines which user-defined function to use for producing a HTTP Expires Header
 	// https://developers.google.com/speed/docs/insights/LeverageBrowserCaching
-	AddHeaders func(ctx *macaron.Context)
+	AddHeaders func(ctx *web.Context)
 	// FileSystem is the interface for supporting any implementation of file system.
 	FileSystem http.FileSystem
+	// Exclude paths from being served
+	Exclude []string
 }
 
 // FIXME: to be deleted.
@@ -115,12 +117,18 @@ func prepareStaticOptions(dir string, options []StaticOptions) StaticOptions {
 	return prepareStaticOption(dir, opt)
 }
 
-func staticHandler(ctx *macaron.Context, log log.Logger, opt StaticOptions) bool {
+func staticHandler(ctx *web.Context, log log.Logger, opt StaticOptions) bool {
 	if ctx.Req.Method != "GET" && ctx.Req.Method != "HEAD" {
 		return false
 	}
 
 	file := ctx.Req.URL.Path
+	for _, p := range opt.Exclude {
+		if file == p {
+			return false
+		}
+	}
+
 	// if we have a prefix, filter requests by stripping the prefix
 	if opt.Prefix != "" {
 		if !strings.HasPrefix(file, opt.Prefix) {
@@ -151,16 +159,17 @@ func staticHandler(ctx *macaron.Context, log log.Logger, opt StaticOptions) bool
 	if fi.IsDir() {
 		// Redirect if missing trailing slash.
 		if !strings.HasSuffix(ctx.Req.URL.Path, "/") {
-			path := fmt.Sprintf("%s/", ctx.Req.URL.Path)
-			if !strings.HasPrefix(path, "/") {
+			redirectPath := path.Clean(ctx.Req.URL.Path)
+			redirectPath = fmt.Sprintf("%s/", redirectPath)
+			if !strings.HasPrefix(redirectPath, "/") {
 				// Disambiguate that it's a path relative to this server
-				path = fmt.Sprintf("/%s", path)
+				redirectPath = fmt.Sprintf("/%s", redirectPath)
 			} else {
 				// A string starting with // or /\ is interpreted by browsers as a URL, and not a server relative path
 				rePrefix := regexp.MustCompile(`^(?:/\\|/+)`)
-				path = rePrefix.ReplaceAllString(path, "/")
+				redirectPath = rePrefix.ReplaceAllString(redirectPath, "/")
 			}
-			http.Redirect(ctx.Resp, ctx.Req, path, http.StatusFound)
+			http.Redirect(ctx.Resp, ctx.Req, redirectPath, http.StatusFound)
 			return true
 		}
 
@@ -195,11 +204,11 @@ func staticHandler(ctx *macaron.Context, log log.Logger, opt StaticOptions) bool
 }
 
 // Static returns a middleware handler that serves static files in the given directory.
-func Static(directory string, staticOpt ...StaticOptions) macaron.Handler {
+func Static(directory string, staticOpt ...StaticOptions) web.Handler {
 	opt := prepareStaticOptions(directory, staticOpt)
 
 	logger := log.New("static")
-	return func(ctx *macaron.Context) {
+	return func(ctx *web.Context) {
 		staticHandler(ctx, logger, opt)
 	}
 }

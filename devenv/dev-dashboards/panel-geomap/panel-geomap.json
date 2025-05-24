@@ -3,7 +3,10 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": "-- Grafana --",
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -19,15 +22,24 @@
     ]
   },
   "editable": true,
+  "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "links": [],
   "liveNow": false,
   "panels": [
     {
+      "datasource": { "type": "testdata" },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "continuous-GrYlRd"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -55,12 +67,14 @@
       "options": {
         "basemap": {
           "config": {},
+          "name": "Layer 0",
           "type": "default"
         },
         "controls": {
           "mouseWheelZoom": true,
           "showAttribution": true,
           "showDebug": false,
+          "showMeasure": false,
           "showScale": false,
           "showZoom": true
         },
@@ -86,9 +100,13 @@
               "lookup": "State",
               "mode": "auto"
             },
+            "name": "Layer 1",
             "type": "markers"
           }
         ],
+        "tooltip": {
+          "mode": "details"
+        },
         "view": {
           "id": "coords",
           "lat": 38.297683,
@@ -97,6 +115,7 @@
           "zoom": 3.98
         }
       },
+      "pluginVersion": "9.2.0-pre",
       "targets": [
         {
           "csvFileName": "flight_info_by_state.csv",
@@ -108,10 +127,18 @@
       "type": "geomap"
     },
     {
+      "datasource": { "type": "testdata" },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -143,12 +170,14 @@
       "options": {
         "basemap": {
           "config": {},
+          "name": "Layer 0",
           "type": "default"
         },
         "controls": {
           "mouseWheelZoom": true,
           "showAttribution": true,
           "showDebug": false,
+          "showMeasure": false,
           "showScale": false,
           "showZoom": true
         },
@@ -174,9 +203,13 @@
               "lookup": "State",
               "mode": "auto"
             },
+            "name": "Layer 1",
             "type": "markers"
           }
         ],
+        "tooltip": {
+          "mode": "details"
+        },
         "view": {
           "id": "coords",
           "lat": 38.297683,
@@ -185,6 +218,7 @@
           "zoom": 3.98
         }
       },
+      "pluginVersion": "9.2.0-pre",
       "targets": [
         {
           "csvFileName": "flight_info_by_state.csv",
@@ -196,10 +230,18 @@
       "type": "geomap"
     },
     {
+      "datasource": { "type": "testdata" },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "continuous-BlYlRd"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -227,12 +269,14 @@
       "options": {
         "basemap": {
           "config": {},
+          "name": "Layer 0",
           "type": "default"
         },
         "controls": {
           "mouseWheelZoom": true,
           "showAttribution": true,
           "showDebug": false,
+          "showMeasure": false,
           "showScale": false,
           "showZoom": true
         },
@@ -253,9 +297,13 @@
               "lookup": "State",
               "mode": "auto"
             },
+            "name": "Layer 1",
             "type": "heatmap"
           }
         ],
+        "tooltip": {
+          "mode": "details"
+        },
         "view": {
           "id": "coords",
           "lat": 38.251497,
@@ -264,6 +312,7 @@
           "zoom": 4.15
         }
       },
+      "pluginVersion": "9.2.0-pre",
       "targets": [
         {
           "csvFileName": "flight_info_by_state.csv",
@@ -276,10 +325,18 @@
       "type": "geomap"
     },
     {
+      "datasource": { "type": "testdata" },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "continuous-GrYlRd"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -309,12 +366,14 @@
           "config": {
             "server": "world-imagery"
           },
+          "name": "Layer 0",
           "type": "esri-xyz"
         },
         "controls": {
           "mouseWheelZoom": true,
           "showAttribution": true,
           "showDebug": false,
+          "showMeasure": false,
           "showScale": false,
           "showZoom": true
         },
@@ -339,9 +398,13 @@
               "lookup": "State",
               "mode": "auto"
             },
+            "name": "Layer 1",
             "type": "markers"
           }
         ],
+        "tooltip": {
+          "mode": "details"
+        },
         "view": {
           "id": "coords",
           "lat": 40.159084,
@@ -350,6 +413,7 @@
           "zoom": 3.83
         }
       },
+      "pluginVersion": "9.2.0-pre",
       "targets": [
         {
           "csvFileName": "flight_info_by_state.csv",
@@ -362,11 +426,11 @@
     }
   ],
   "refresh": "",
-  "schemaVersion": 30,
-  "style": "dark",
+  "schemaVersion": 37,
   "tags": [
     "gdev",
-    "panel-tests"
+    "panel-tests",
+    "geomap"
   ],
   "templating": {
     "list": []
@@ -391,5 +455,6 @@
   "timezone": "",
   "title": "Panel Tests - Geomap",
   "uid": "2xuwrgV7z",
-  "version": 5
+  "version": 4,
+  "weekStart": ""
 }

@@ -1,47 +1,100 @@
-import React, { FormEvent } from 'react';
-import { Label, Tooltip, Input, Icon, useStyles2 } from '@grafana/ui';
-import { GrafanaTheme2 } from '@grafana/data';
 import { css } from '@emotion/css';
+import { useState } from 'react';
+import { useDebounce } from 'react-use';
+
+import { GrafanaTheme2 } from '@grafana/data';
+import { Trans, useTranslate } from '@grafana/i18n';
+import { Field, Icon, Input, Label, Stack, Tooltip, useStyles2 } from '@grafana/ui';
+
+import { LogMessages, logInfo } from '../../Analytics';
+import { parsePromQLStyleMatcherLoose } from '../../utils/matchers';
 
 interface Props {
-  className?: string;
-  queryString?: string;
+  defaultQueryString?: string;
   onFilterChange: (filterString: string) => void;
 }
 
-export const MatcherFilter = ({ className, onFilterChange, queryString }: Props) => {
+export const MatcherFilter = ({ onFilterChange, defaultQueryString }: Props) => {
   const styles = useStyles2(getStyles);
-  const handleSearchChange = (e: FormEvent<HTMLInputElement>) => {
-    const target = e.target as HTMLInputElement;
-    onFilterChange(target.value);
-  };
+
+  const [filterQuery, setFilterQuery] = useState<string>(defaultQueryString ?? '');
+
+  useDebounce(
+    () => {
+      logInfo(LogMessages.filterByLabel);
+      onFilterChange(filterQuery);
+    },
+    600,
+    [filterQuery]
+  );
+  const { t } = useTranslate();
+
+  const searchIcon = <Icon name={'search'} />;
+  let inputValid = Boolean(defaultQueryString && defaultQueryString.length >= 3);
+  try {
+    if (!defaultQueryString) {
+      inputValid = true;
+    } else {
+      parsePromQLStyleMatcherLoose(defaultQueryString);
+    }
+  } catch (err) {
+    inputValid = false;
+  }
+
   return (
-    <div className={className}>
-      <Label>
-        <Tooltip
-          content={
-            <div>
-              Filter alerts using label querying, ex:
-              <pre>{`{severity="critical", instance=~"cluster-us-.+"}`}</pre>
-            </div>
-          }
-        >
-          <Icon className={styles.icon} name="info-circle" size="xs" />
-        </Tooltip>
-        Search by label
-      </Label>
+    <Field
+      className={styles.fixMargin}
+      invalid={!inputValid}
+      error={!inputValid ? 'Query must use valid matcher syntax. See the examples in the help tooltip.' : null}
+      label={
+        <Label>
+          <Stack gap={0.5} alignItems="center">
+            <span>
+              <Trans i18nKey="alerting.matcher-filter.search-by-label">Search by label</Trans>
+            </span>
+            <Tooltip
+              content={
+                <div>
+                  <Trans i18nKey="alerting.matcher-filter.filter-alerts-using-label-querying-without-spaces">
+                    Filter alerts using label querying without spaces, ex:
+                  </Trans>
+                  <pre>{`{severity="critical", instance=~"cluster-us-.+"}`}</pre>
+                  <Trans i18nKey="alerting.matcher-filter.invalid-use-of-spaces">Invalid use of spaces:</Trans>
+                  <pre>{`{severity= "critical"}`}</pre>
+                  <pre>{`{severity ="critical"}`}</pre>
+                  <Trans i18nKey="alerting.matcher-filter.valid-use-of-spaces">Valid use of spaces:</Trans>
+                  <pre>{`{severity=" critical"}`}</pre>
+                  <Trans i18nKey="alerting.matcher-filter.filter-alerts-using-label-querying-without-braces">
+                    Filter alerts using label querying without braces, ex:
+                  </Trans>
+                  <pre>{`severity="critical", instance=~"cluster-us-.+"`}</pre>
+                </div>
+              }
+            >
+              <Icon name="info-circle" size="sm" />
+            </Tooltip>
+          </Stack>
+        </Label>
+      }
+    >
       <Input
-        placeholder="Search"
-        defaultValue={queryString}
-        onChange={handleSearchChange}
+        placeholder={t('alerting.matcher-filter.search-query-input-placeholder-search', 'Search')}
+        value={filterQuery}
+        onChange={(e) => setFilterQuery(e.currentTarget.value)}
         data-testid="search-query-input"
+        prefix={searchIcon}
+        className={styles.inputWidth}
       />
-    </div>
+    </Field>
   );
 };
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  icon: css`
-    margin-right: ${theme.spacing(0.5)};
-  `,
+  fixMargin: css({
+    marginBottom: 0,
+  }),
+  inputWidth: css({
+    width: 340,
+    flexGrow: 0,
+  }),
 });

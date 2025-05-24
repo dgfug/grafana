@@ -14,11 +14,45 @@ export function pointWithin(px: number, py: number, rlft: number, rtop: number, 
 /**
  * @internal
  */
+export function findRects(qt: Quadtree, sidx?: number, didx?: number) {
+  let rects: Rect[] = [];
+
+  if (qt.o.length) {
+    rects.push(...qt.o.filter((rect) => (sidx == null || rect.sidx === sidx) && (didx == null || rect.didx === didx)));
+  }
+
+  if (qt.q) {
+    for (let i = 0; i < qt.q.length; i++) {
+      rects.push(...findRects(qt.q[i], sidx, didx));
+    }
+  }
+
+  return rects;
+}
+
+/**
+ * @internal
+ *
+ * Determines if r2 is intersected by r1.
+ */
+export function intersects(r1: Rect, r2: Rect) {
+  return r1.x <= r2.x + r2.w && r1.x + r1.w >= r2.x && r1.y + r1.h >= r2.y && r1.y <= r2.y + r2.h;
+}
+
+/**
+ * @internal
+ */
 export class Quadtree {
   o: Rect[];
   q: Quads | null;
 
-  constructor(public x: number, public y: number, public w: number, public h: number, public l: number = 0) {
+  constructor(
+    public x: number,
+    public y: number,
+    public w: number,
+    public h: number,
+    public l = 0
+  ) {
     this.o = [];
     this.q = null;
   }

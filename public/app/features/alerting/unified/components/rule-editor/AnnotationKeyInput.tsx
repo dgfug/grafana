@@ -1,7 +1,10 @@
+import { useMemo } from 'react';
+
 import { SelectableValue } from '@grafana/data';
-import React, { FC, useMemo } from 'react';
-import { SelectWithAdd } from './SelectWIthAdd';
+
 import { Annotation, annotationLabels } from '../../utils/constants';
+
+import { SelectWithAdd } from './SelectWIthAdd';
 
 interface Props {
   onChange: (value: string) => void;
@@ -10,9 +13,10 @@ interface Props {
   value?: string;
   width?: number;
   className?: string;
+  'aria-label'?: string;
 }
 
-export const AnnotationKeyInput: FC<Props> = ({ value, existingKeys, ...rest }) => {
+export const AnnotationKeyInput = ({ value, existingKeys, 'aria-label': ariaLabel, ...rest }: Props) => {
   const annotationOptions = useMemo(
     (): SelectableValue[] =>
       Object.values(Annotation)
@@ -23,6 +27,7 @@ export const AnnotationKeyInput: FC<Props> = ({ value, existingKeys, ...rest }) 
 
   return (
     <SelectWithAdd
+      aria-label={ariaLabel}
       value={value}
       options={annotationOptions}
       custom={!!value && !(Object.values(Annotation) as string[]).includes(value)}

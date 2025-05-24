@@ -1,115 +1,178 @@
-import { MatcherOperator, Silence, SilenceCreatePayload } from 'app/plugins/datasource/alertmanager/types';
-import React, { FC, useMemo, useState } from 'react';
-import { Button, Field, FieldSet, Input, LinkButton, TextArea, useStyles2 } from '@grafana/ui';
+import { css } from '@emotion/css';
+import { pickBy } from 'lodash';
+import { useMemo, useState } from 'react';
+import { FormProvider, useForm } from 'react-hook-form';
+import { useParams } from 'react-router-dom-v5-compat';
+import { useDebounce } from 'react-use';
+
 import {
-  DefaultTimeZone,
-  parseDuration,
-  intervalToAbbreviatedDurationString,
+  GrafanaTheme2,
   addDurationToDate,
   dateTime,
+  intervalToAbbreviatedDurationString,
   isValidDate,
-  UrlQueryMap,
-  GrafanaTheme2,
+  parseDuration,
 } from '@grafana/data';
-import { useDebounce } from 'react-use';
-import { config } from '@grafana/runtime';
-import { pickBy } from 'lodash';
-import MatchersField from './MatchersField';
-import { useForm, FormProvider } from 'react-hook-form';
+import { Trans, useTranslate } from '@grafana/i18n';
+import { config, isFetchError, locationService } from '@grafana/runtime';
+import {
+  Alert,
+  Button,
+  Field,
+  FieldSet,
+  Input,
+  LinkButton,
+  LoadingPlaceholder,
+  Stack,
+  TextArea,
+  useStyles2,
+} from '@grafana/ui';
+import { SilenceCreatedResponse, alertSilencesApi } from 'app/features/alerting/unified/api/alertSilencesApi';
+import { MATCHER_ALERT_RULE_UID } from 'app/features/alerting/unified/utils/constants';
+import { GRAFANA_RULES_SOURCE_NAME, getDatasourceAPIUid } from 'app/features/alerting/unified/utils/datasource';
+import { MatcherOperator, SilenceCreatePayload } from 'app/plugins/datasource/alertmanager/types';
+
+import { AlertmanagerAction, useAlertmanagerAbility } from '../../hooks/useAbilities';
+import { useAlertmanager } from '../../state/AlertmanagerContext';
 import { SilenceFormFields } from '../../types/silence-form';
-import { useDispatch } from 'react-redux';
-import { createOrUpdateSilenceAction } from '../../state/actions';
-import { SilencePeriod } from './SilencePeriod';
-import { css, cx } from '@emotion/css';
-import { useUnifiedAlertingSelector } from '../../hooks/useUnifiedAlertingSelector';
+import { matcherFieldToMatcher } from '../../utils/alertmanager';
 import { makeAMLink } from '../../utils/misc';
-import { useCleanup } from 'app/core/hooks/useCleanup';
-import { useQueryParams } from 'app/core/hooks/useQueryParams';
-import { parseQueryParamMatchers } from '../../utils/matchers';
-import { matcherToMatcherField, matcherFieldToMatcher } from '../../utils/alertmanager';
+import { withPageErrorBoundary } from '../../withPageErrorBoundary';
+import { AlertmanagerPageWrapper } from '../AlertingPageWrapper';
+import { GrafanaAlertmanagerDeliveryWarning } from '../GrafanaAlertmanagerDeliveryWarning';
 
-interface Props {
-  silence?: Silence;
-  alertManagerSourceName: string;
-}
+import MatchersField from './MatchersField';
+import { SilencePeriod } from './SilencePeriod';
+import { SilencedInstancesPreview } from './SilencedInstancesPreview';
+import { getDefaultSilenceFormValues, getFormFieldsForSilence } from './utils';
 
-const defaultsFromQuery = (queryParams: UrlQueryMap): Partial<SilenceFormFields> => {
-  const defaults: Partial<SilenceFormFields> = {};
+/**
+ * Silences editor for editing an existing silence.
+ *
+ * Fetches silence details from API, based on `silenceId`
+ */
+const ExistingSilenceEditor = () => {
+  const { id: silenceId = '' } = useParams();
+  const { selectedAlertmanager: alertManagerSourceName = '' } = useAlertmanager();
+  const {
+    data: silence,
+    isLoading: getSilenceIsLoading,
+    error: errorGettingExistingSilence,
+  } = alertSilencesApi.endpoints.getSilence.useQuery({
+    id: silenceId,
+    datasourceUid: getDatasourceAPIUid(alertManagerSourceName),
+    ruleMetadata: true,
+    accessControl: true,
+  });
+  const ruleUid = silence?.matchers?.find((m) => m.name === MATCHER_ALERT_RULE_UID)?.value;
+  const isGrafanaAlertManager = alertManagerSourceName === GRAFANA_RULES_SOURCE_NAME;
 
-  const { matchers, comment } = queryParams;
-
-  if (typeof matchers === 'string') {
-    const formMatchers = parseQueryParamMatchers(matchers);
-    if (formMatchers.length) {
-      defaults.matchers = formMatchers.map(matcherToMatcherField);
+  const defaultValues = useMemo(() => {
+    if (!silence) {
+      return;
     }
+    const filteredMatchers = silence.matchers?.filter((m) => m.name !== MATCHER_ALERT_RULE_UID);
+    return getFormFieldsForSilence({ ...silence, matchers: filteredMatchers });
+  }, [silence]);
+  const { t } = useTranslate();
+
+  if (silenceId && getSilenceIsLoading) {
+    return (
+      <LoadingPlaceholder
+        text={t(
+          'alerting.existing-silence-editor.text-loading-existing-silence-information',
+          'Loading existing silence information...'
+        )}
+      />
+    );
   }
 
-  if (typeof comment === 'string') {
-    defaults.comment = comment;
+  const existingSilenceNotFound =
+    isFetchError(errorGettingExistingSilence) && errorGettingExistingSilence.status === 404;
+
+  if (existingSilenceNotFound) {
+    return (
+      <Alert
+        title={t(
+          'alerting.existing-silence-editor.title-silence-not-found',
+          'Existing silence "{{silenceId}}" not found',
+          { silenceId }
+        )}
+        severity="warning"
+      />
+    );
   }
 
-  return defaults;
+  const canEditSilence = isGrafanaAlertManager ? silence?.accessControl?.write : true;
+
+  if (!canEditSilence) {
+    return (
+      <Alert
+        title={t(
+          'alerting.existing-silence-editor.title-permission-editrecreate-silence',
+          'You do not have permission to edit/recreate this silence'
+        )}
+        severity="error"
+      />
+    );
+  }
+
+  return (
+    <>
+      <GrafanaAlertmanagerDeliveryWarning currentAlertmanager={alertManagerSourceName} />
+      <SilencesEditor ruleUid={ruleUid} formValues={defaultValues} alertManagerSourceName={alertManagerSourceName} />
+    </>
+  );
 };
 
-const getDefaultFormValues = (queryParams: UrlQueryMap, silence?: Silence): SilenceFormFields => {
-  const now = new Date();
-  if (silence) {
-    const isExpired = Date.parse(silence.endsAt) < Date.now();
-    const interval = isExpired
-      ? {
-          start: now,
-          end: addDurationToDate(now, { hours: 2 }),
-        }
-      : { start: new Date(silence.startsAt), end: new Date(silence.endsAt) };
-    return {
-      id: silence.id,
-      startsAt: interval.start.toISOString(),
-      endsAt: interval.end.toISOString(),
-      comment: silence.comment,
-      createdBy: silence.createdBy,
-      duration: intervalToAbbreviatedDurationString(interval),
-      isRegex: false,
-      matchers: silence.matchers?.map(matcherToMatcherField) || [],
-      matcherName: '',
-      matcherValue: '',
-      timeZone: DefaultTimeZone,
-    };
-  } else {
-    const endsAt = addDurationToDate(now, { hours: 2 }); // Default time period is now + 2h
-    return {
-      id: '',
-      startsAt: now.toISOString(),
-      endsAt: endsAt.toISOString(),
-      comment: '',
-      createdBy: config.bootData.user.name,
-      duration: '2h',
-      isRegex: false,
-      matchers: [{ name: '', value: '', operator: MatcherOperator.equal }],
-      matcherName: '',
-      matcherValue: '',
-      timeZone: DefaultTimeZone,
-      ...defaultsFromQuery(queryParams),
-    };
-  }
+type SilencesEditorProps = {
+  formValues?: SilenceFormFields;
+  alertManagerSourceName: string;
+  onSilenceCreated?: (response: SilenceCreatedResponse) => void;
+  onCancel?: () => void;
+  ruleUid?: string;
 };
 
-export const SilencesEditor: FC<Props> = ({ silence, alertManagerSourceName }) => {
-  const [queryParams] = useQueryParams();
-  const defaultValues = useMemo(() => getDefaultFormValues(queryParams, silence), [silence, queryParams]);
-  const formAPI = useForm({ defaultValues });
-  const dispatch = useDispatch();
+/**
+ * Base silences editor used for new silences (from both the list view and the drawer),
+ * and for editing existing silences
+ */
+export const SilencesEditor = ({
+  formValues = getDefaultSilenceFormValues(),
+  alertManagerSourceName,
+  onSilenceCreated,
+  onCancel,
+  ruleUid,
+}: SilencesEditorProps) => {
+  const [previewAlertsSupported, previewAlertsAllowed] = useAlertmanagerAbility(
+    AlertmanagerAction.PreviewSilencedInstances
+  );
+  const canPreview = previewAlertsSupported && previewAlertsAllowed;
+
+  const [createSilence, { isLoading }] = alertSilencesApi.endpoints.createSilence.useMutation();
+  const formAPI = useForm({ defaultValues: formValues });
   const styles = useStyles2(getStyles);
-
-  const { loading } = useUnifiedAlertingSelector((state) => state.updateSilence);
-
-  useCleanup((state) => state.unifiedAlerting.updateSilence);
 
   const { register, handleSubmit, formState, watch, setValue, clearErrors } = formAPI;
 
-  const onSubmit = (data: SilenceFormFields) => {
+  const [duration, startsAt, endsAt, matchers] = watch(['duration', 'startsAt', 'endsAt', 'matchers']);
+
+  /** Default action taken after creation or cancellation, if corresponding method is not defined */
+  const defaultHandler = () => {
+    locationService.push(makeAMLink('/alerting/silences', alertManagerSourceName));
+  };
+
+  const onSilenceCreatedHandler = onSilenceCreated || defaultHandler;
+  const onCancelHandler = onCancel || defaultHandler;
+
+  const onSubmit = async (data: SilenceFormFields) => {
     const { id, startsAt, endsAt, comment, createdBy, matchers: matchersFields } = data;
-    const matchers = matchersFields.map(matcherFieldToMatcher);
+
+    if (ruleUid) {
+      matchersFields.push({ name: MATCHER_ALERT_RULE_UID, value: ruleUid, operator: MatcherOperator.equal });
+    }
+
+    const matchersToSend = matchersFields.map(matcherFieldToMatcher).filter((field) => field.name && field.value);
     const payload = pickBy(
       {
         id,
@@ -117,23 +180,16 @@ export const SilencesEditor: FC<Props> = ({ silence, alertManagerSourceName }) =
         endsAt,
         comment,
         createdBy,
-        matchers,
+        matchers: matchersToSend,
       },
       (value) => !!value
     ) as SilenceCreatePayload;
-    dispatch(
-      createOrUpdateSilenceAction({
-        alertManagerSourceName,
-        payload,
-        exitOnSave: true,
-        successMessage: `Silence ${payload.id ? 'updated' : 'created'}`,
-      })
-    );
+    await createSilence({ datasourceUid: getDatasourceAPIUid(alertManagerSourceName), payload })
+      .unwrap()
+      .then((newSilenceResponse) => {
+        onSilenceCreatedHandler?.(newSilenceResponse);
+      });
   };
-
-  const duration = watch('duration');
-  const startsAt = watch('startsAt');
-  const endsAt = watch('endsAt');
 
   // Keep duration and endsAt in sync
   const [prevDuration, setPrevDuration] = useState(duration);
@@ -160,15 +216,17 @@ export const SilencesEditor: FC<Props> = ({ silence, alertManagerSourceName }) =
     700,
     [clearErrors, duration, endsAt, prevDuration, setValue, startsAt]
   );
+  const { t } = useTranslate();
+  const userLogged = Boolean(config.bootData.user.isSignedIn && config.bootData.user.name);
 
   return (
     <FormProvider {...formAPI}>
       <form onSubmit={handleSubmit(onSubmit)}>
-        <FieldSet label={`${silence ? 'Recreate silence' : 'Create silence'}`}>
-          <div className={styles.flexRow}>
+        <FieldSet className={styles.formContainer}>
+          <div className={styles.silencePeriod}>
             <SilencePeriod />
             <Field
-              label="Duration"
+              label={t('alerting.silences-editor.label-duration', 'Duration')}
               invalid={!!formState.errors.duration}
               error={
                 formState.errors.duration &&
@@ -176,7 +234,6 @@ export const SilencesEditor: FC<Props> = ({ silence, alertManagerSourceName }) =
               }
             >
               <Input
-                className={styles.createdBy}
                 {...register('duration', {
                   validate: (value) =>
                     Object.keys(parseDuration(value)).length === 0
@@ -188,68 +245,92 @@ export const SilencesEditor: FC<Props> = ({ silence, alertManagerSourceName }) =
             </Field>
           </div>
 
-          <MatchersField />
+          <MatchersField required={Boolean(!ruleUid)} ruleUid={ruleUid} />
+
           <Field
-            className={cx(styles.field, styles.textArea)}
-            label="Comment"
+            label={t('alerting.silences-editor.label-comment', 'Comment')}
             required
             error={formState.errors.comment?.message}
             invalid={!!formState.errors.comment}
           >
             <TextArea
               {...register('comment', { required: { value: true, message: 'Required.' } })}
-              placeholder="Details about the silence"
+              rows={5}
+              placeholder={t(
+                'alerting.silences-editor.comment-placeholder-details-about-the-silence',
+                'Details about the silence'
+              )}
+              id="comment"
             />
           </Field>
-          <Field
-            className={cx(styles.field, styles.createdBy)}
-            label="Created by"
-            required
-            error={formState.errors.createdBy?.message}
-            invalid={!!formState.errors.createdBy}
-          >
-            <Input {...register('createdBy', { required: { value: true, message: 'Required.' } })} placeholder="User" />
-          </Field>
+          {!userLogged && (
+            <Field
+              label={t('alerting.silences-editor.label-created-by', 'Created By')}
+              required
+              error={formState.errors.createdBy?.message}
+              invalid={!!formState.errors.createdBy}
+            >
+              <Input
+                {...register('createdBy', { required: { value: true, message: 'Required.' } })}
+                placeholder={t(
+                  'alerting.silences-editor.placeholder-whos-creating-the-silence',
+                  "Who's creating the silence"
+                )}
+              />
+            </Field>
+          )}
+          {canPreview && (
+            <SilencedInstancesPreview amSourceName={alertManagerSourceName} matchers={matchers} ruleUid={ruleUid} />
+          )}
         </FieldSet>
-        <div className={styles.flexRow}>
-          {loading && (
-            <Button disabled={true} icon="fa fa-spinner" variant="primary">
-              Saving...
+        <Stack gap={1}>
+          {isLoading && (
+            <Button disabled={true} icon="spinner" variant="primary">
+              <Trans i18nKey="alerting.silences-editor.saving">Saving...</Trans>
             </Button>
           )}
-          {!loading && <Button type="submit">Submit</Button>}
-          <LinkButton
-            href={makeAMLink('alerting/silences', alertManagerSourceName)}
-            variant={'secondary'}
-            fill="outline"
-          >
-            Cancel
+          {!isLoading && (
+            <Button type="submit">
+              <Trans i18nKey="alerting.silences-editor.save-silence">Save silence</Trans>
+            </Button>
+          )}
+          <LinkButton onClick={onCancelHandler} variant={'secondary'}>
+            <Trans i18nKey="alerting.common.cancel">Cancel</Trans>
           </LinkButton>
-        </div>
+        </Stack>
       </form>
     </FormProvider>
   );
 };
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  field: css`
-    margin: ${theme.spacing(1, 0)};
-  `,
-  textArea: css`
-    width: 600px;
-  `,
-  createdBy: css`
-    width: 200px;
-  `,
-  flexRow: css`
-    display: flex;
-    flex-direction: row;
-    justify-content: flex-start;
-
-    & > * {
-      margin-right: ${theme.spacing(1)};
-    }
-  `,
+  formContainer: css({
+    maxWidth: theme.breakpoints.values.md,
+  }),
+  alertRule: css({
+    paddingBottom: theme.spacing(2),
+  }),
+  silencePeriod: css({
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: theme.spacing(1),
+    maxWidth: theme.breakpoints.values.sm,
+    paddingTop: theme.spacing(2),
+  }),
 });
 
-export default SilencesEditor;
+function ExistingSilenceEditorPage() {
+  const pageNav = {
+    id: 'silence-edit',
+    text: 'Edit silence',
+    subTitle: 'Recreate existing silence to stop notifications from a particular alert rule',
+  };
+  return (
+    <AlertmanagerPageWrapper navId="silences" pageNav={pageNav} accessType="instance">
+      <ExistingSilenceEditor />
+    </AlertmanagerPageWrapper>
+  );
+}
+
+export default withPageErrorBoundary(ExistingSilenceEditorPage);

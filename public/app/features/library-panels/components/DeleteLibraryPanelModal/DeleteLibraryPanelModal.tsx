@@ -1,12 +1,15 @@
-import React, { FC, useEffect, useMemo, useReducer } from 'react';
-import { Button, Modal, useStyles } from '@grafana/ui';
-import { LoadingState } from '@grafana/data';
+import { FC, useEffect, useMemo, useReducer } from 'react';
 
+import { LoadingState } from '@grafana/data';
+import { Trans, useTranslate } from '@grafana/i18n';
+import { Button, Modal, useStyles2 } from '@grafana/ui';
+
+import { getModalStyles } from '../../styles';
 import { LibraryElementDTO } from '../../types';
 import { asyncDispatcher } from '../LibraryPanelsView/actions';
-import { deleteLibraryPanelModalReducer, initialDeleteLibraryPanelModalState } from './reducer';
+
 import { getConnectedDashboards } from './actions';
-import { getModalStyles } from '../../styles';
+import { deleteLibraryPanelModalReducer, initialDeleteLibraryPanelModalState } from './reducer';
 
 interface Props {
   libraryPanel: LibraryElementDTO;
@@ -15,7 +18,7 @@ interface Props {
 }
 
 export const DeleteLibraryPanelModal: FC<Props> = ({ libraryPanel, onDismiss, onConfirm }) => {
-  const styles = useStyles(getModalStyles);
+  const styles = useStyles2(getModalStyles);
   const [{ dashboardTitles, loadingState }, dispatch] = useReducer(
     deleteLibraryPanelModalReducer,
     initialDeleteLibraryPanelModalState
@@ -24,11 +27,18 @@ export const DeleteLibraryPanelModal: FC<Props> = ({ libraryPanel, onDismiss, on
   useEffect(() => {
     asyncDispatch(getConnectedDashboards(libraryPanel));
   }, [asyncDispatch, libraryPanel]);
+  const { t } = useTranslate();
   const connected = Boolean(dashboardTitles.length);
   const done = loadingState === LoadingState.Done;
 
   return (
-    <Modal className={styles.modal} title="Delete library panel" icon="trash-alt" onDismiss={onDismiss} isOpen={true}>
+    <Modal
+      className={styles.modal}
+      title={t('library-panels.delete-library-panel-modal.title-delete-library-panel', 'Delete library panel')}
+      icon="trash-alt"
+      onDismiss={onDismiss}
+      isOpen={true}
+    >
       {!done ? <LoadingIndicator /> : null}
       {done ? (
         <div>
@@ -37,10 +47,10 @@ export const DeleteLibraryPanelModal: FC<Props> = ({ libraryPanel, onDismiss, on
 
           <Modal.ButtonRow>
             <Button variant="secondary" onClick={onDismiss} fill="outline">
-              Cancel
+              <Trans i18nKey="library-panels.delete-library-panel-modal.cancel">Cancel</Trans>
             </Button>
             <Button variant="destructive" onClick={onConfirm} disabled={connected}>
-              Delete
+              <Trans i18nKey="library-panels.delete-library-panel-modal.delete">Delete</Trans>
             </Button>
           </Modal.ButtonRow>
         </div>
@@ -49,16 +59,24 @@ export const DeleteLibraryPanelModal: FC<Props> = ({ libraryPanel, onDismiss, on
   );
 };
 
-const LoadingIndicator: FC = () => <span>Loading library panel...</span>;
+const LoadingIndicator = () => (
+  <span>
+    <Trans i18nKey="library-panels.loading-indicator.loading-library-panel">Loading library panel...</Trans>
+  </span>
+);
 
-const Confirm: FC = () => {
-  const styles = useStyles(getModalStyles);
+const Confirm = () => {
+  const styles = useStyles2(getModalStyles);
 
-  return <div className={styles.modalText}>Do you want to delete this panel?</div>;
+  return (
+    <div className={styles.modalText}>
+      <Trans i18nKey="library-panels.confirm.delete-panel">Do you want to delete this panel?</Trans>
+    </div>
+  );
 };
 
 const HasConnectedDashboards: FC<{ dashboardTitles: string[] }> = ({ dashboardTitles }) => {
-  const styles = useStyles(getModalStyles);
+  const styles = useStyles2(getModalStyles);
   const suffix = dashboardTitles.length === 1 ? 'dashboard.' : 'dashboards.';
   const message = `${dashboardTitles.length} ${suffix}`;
   if (dashboardTitles.length === 0) {
@@ -75,7 +93,9 @@ const HasConnectedDashboards: FC<{ dashboardTitles: string[] }> = ({ dashboardTi
       <table className={styles.myTable}>
         <thead>
           <tr>
-            <th>Dashboard name</th>
+            <th>
+              <Trans i18nKey="library-panels.has-connected-dashboards.dashboard-name">Dashboard name</Trans>
+            </th>
           </tr>
         </thead>
         <tbody>

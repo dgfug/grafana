@@ -1,25 +1,40 @@
-import React, { FC } from 'react';
+import { DragDropContext, Droppable, DropResult } from '@hello-pangea/dnd';
+
+import { useTranslate } from '@grafana/i18n';
+import { FieldSet } from '@grafana/ui';
 
 import { PlaylistTableRows } from './PlaylistTableRows';
-import { PlaylistItem } from './types';
+import { PlaylistItemUI } from './types';
 
-interface PlaylistTableProps {
-  items: PlaylistItem[];
-  onMoveUp: (item: PlaylistItem) => void;
-  onMoveDown: (item: PlaylistItem) => void;
-  onDelete: (item: PlaylistItem) => void;
+interface Props {
+  items: PlaylistItemUI[];
+  deleteItem: (idx: number) => void;
+  moveItem: (src: number, dst: number) => void;
 }
 
-export const PlaylistTable: FC<PlaylistTableProps> = ({ items, onMoveUp, onMoveDown, onDelete }) => {
-  return (
-    <div className="gf-form-group">
-      <h3 className="page-headering">Dashboards</h3>
+export const PlaylistTable = ({ items, deleteItem, moveItem }: Props) => {
+  const { t } = useTranslate();
 
-      <table className="filter-table">
-        <tbody>
-          <PlaylistTableRows items={items} onMoveUp={onMoveUp} onMoveDown={onMoveDown} onDelete={onDelete} />
-        </tbody>
-      </table>
-    </div>
+  const onDragEnd = (d: DropResult) => {
+    if (d.destination) {
+      moveItem(d.source.index, d.destination?.index);
+    }
+  };
+
+  return (
+    <FieldSet label={t('playlist-edit.form.table-heading', 'Dashboards')}>
+      <DragDropContext onDragEnd={onDragEnd}>
+        <Droppable droppableId="playlist-list" direction="vertical">
+          {(provided) => {
+            return (
+              <div ref={provided.innerRef} {...provided.droppableProps}>
+                <PlaylistTableRows items={items} onDelete={deleteItem} />
+                {provided.placeholder}
+              </div>
+            );
+          }}
+        </Droppable>
+      </DragDropContext>
+    </FieldSet>
   );
 };

@@ -1,14 +1,15 @@
+import * as React from 'react';
+
 import { GrafanaManagedReceiverConfig } from 'app/plugins/datasource/alertmanager/types';
 import { CloudNotifierType, NotifierType } from 'app/types';
-import React from 'react';
+
 import { ControlledField } from '../hooks/useControlledFieldArray';
 
 export interface ChannelValues {
-  __id: string; // used to correllate form values to original DTOs
+  __id: string; // used to correlate form values to original DTOs
   type: string;
   settings: Record<string, any>;
-  secureSettings: Record<string, any>;
-  secureFields: Record<string, boolean>;
+  secureFields: Record<string, boolean | ''>;
 }
 
 export interface ReceiverFormValues<R extends ChannelValues> {
@@ -23,7 +24,8 @@ export interface CloudChannelValues extends ChannelValues {
 
 export interface GrafanaChannelValues extends ChannelValues {
   type: NotifierType;
-  disableResolveMessage: boolean;
+  provenance?: string;
+  disableResolveMessage?: boolean;
 }
 
 export interface CommonSettingsComponentProps {

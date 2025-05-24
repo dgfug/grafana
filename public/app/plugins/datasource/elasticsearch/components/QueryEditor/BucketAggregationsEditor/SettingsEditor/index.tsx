@@ -1,17 +1,21 @@
+import { uniqueId } from 'lodash';
+import { ComponentProps, useRef } from 'react';
+
 import { InlineField, Input } from '@grafana/ui';
-import React, { ComponentProps } from 'react';
+
 import { useDispatch } from '../../../../hooks/useStatelessReducer';
+import { BucketAggregation } from '../../../../types';
 import { SettingsEditorContainer } from '../../SettingsEditorContainer';
 import { changeBucketAggregationSetting } from '../state/actions';
-import { BucketAggregation } from '../aggregations';
 import { bucketAggregationConfig } from '../utils';
-import { FiltersSettingsEditor } from './FiltersSettingsEditor';
-import { useDescription } from './useDescription';
+
 import { DateHistogramSettingsEditor } from './DateHistogramSettingsEditor';
+import { FiltersSettingsEditor } from './FiltersSettingsEditor';
 import { TermsSettingsEditor } from './TermsSettingsEditor';
+import { useDescription } from './useDescription';
 
 export const inlineFieldProps: Partial<ComponentProps<typeof InlineField>> = {
-  labelWidth: 16,
+  labelWidth: 18,
 };
 
 interface Props {
@@ -19,6 +23,8 @@ interface Props {
 }
 
 export const SettingsEditor = ({ bucketAgg }: Props) => {
+  const { current: baseId } = useRef(uniqueId('es-setting-'));
+
   const dispatch = useDispatch();
 
   const settingsDescription = useDescription(bucketAgg);
@@ -32,6 +38,7 @@ export const SettingsEditor = ({ bucketAgg }: Props) => {
       {bucketAgg.type === 'geohash_grid' && (
         <InlineField label="Precision" {...inlineFieldProps}>
           <Input
+            id={`${baseId}-geohash_grid-precision`}
             onBlur={(e) =>
               dispatch(
                 changeBucketAggregationSetting({ bucketAgg, settingName: 'precision', newValue: e.target.value })
@@ -48,6 +55,7 @@ export const SettingsEditor = ({ bucketAgg }: Props) => {
         <>
           <InlineField label="Interval" {...inlineFieldProps}>
             <Input
+              id={`${baseId}-histogram-interval`}
               onBlur={(e) =>
                 dispatch(
                   changeBucketAggregationSetting({ bucketAgg, settingName: 'interval', newValue: e.target.value })
@@ -61,6 +69,7 @@ export const SettingsEditor = ({ bucketAgg }: Props) => {
 
           <InlineField label="Min Doc Count" {...inlineFieldProps}>
             <Input
+              id={`${baseId}-histogram-min_doc_count`}
               onBlur={(e) =>
                 dispatch(
                   changeBucketAggregationSetting({ bucketAgg, settingName: 'min_doc_count', newValue: e.target.value })

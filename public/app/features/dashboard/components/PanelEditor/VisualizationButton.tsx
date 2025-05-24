@@ -1,31 +1,32 @@
-import React, { FC } from 'react';
 import { css } from '@emotion/css';
-import { GrafanaTheme } from '@grafana/data';
-import { ToolbarButton, ButtonGroup, useStyles } from '@grafana/ui';
-import { StoreState } from 'app/types';
-import { useDispatch, useSelector } from 'react-redux';
-import { setPanelEditorUIState, toggleVizPicker } from './state/reducers';
+
 import { selectors } from '@grafana/e2e-selectors';
-import { PanelModel } from '../../state';
+import { useTranslate } from '@grafana/i18n';
+import { ToolbarButton, ButtonGroup } from '@grafana/ui';
+import { useDispatch, useSelector } from 'app/types';
+
+import { PanelModel } from '../../state/PanelModel';
 import { getPanelPluginWithFallback } from '../../state/selectors';
+
+import { updatePanelEditorUIState } from './state/actions';
+import { toggleVizPicker } from './state/reducers';
 
 type Props = {
   panel: PanelModel;
 };
 
-export const VisualizationButton: FC<Props> = ({ panel }) => {
-  const styles = useStyles(getStyles);
+export const VisualizationButton = ({ panel }: Props) => {
   const dispatch = useDispatch();
   const plugin = useSelector(getPanelPluginWithFallback(panel.type));
-  const isPanelOptionsVisible = useSelector((state: StoreState) => state.panelEditor.ui.isPanelOptionsVisible);
-  const isVizPickerOpen = useSelector((state: StoreState) => state.panelEditor.isVizPickerOpen);
-
+  const isPanelOptionsVisible = useSelector((state) => state.panelEditor.ui.isPanelOptionsVisible);
+  const isVizPickerOpen = useSelector((state) => state.panelEditor.isVizPickerOpen);
+  const { t } = useTranslate();
   const onToggleOpen = () => {
     dispatch(toggleVizPicker(!isVizPickerOpen));
   };
 
   const onToggleOptionsPane = () => {
-    dispatch(setPanelEditorUIState({ isPanelOptionsVisible: !isPanelOptionsVisible }));
+    dispatch(updatePanelEditorUIState({ isPanelOptionsVisible: !isPanelOptionsVisible }));
   };
 
   if (!plugin) {
@@ -37,20 +38,35 @@ export const VisualizationButton: FC<Props> = ({ panel }) => {
       <ButtonGroup>
         <ToolbarButton
           className={styles.vizButton}
-          tooltip="Click to change visualization"
+          tooltip={t(
+            'dashboard.visualization-button.tooltip-click-to-change-visualization',
+            'Click to change visualization'
+          )}
           imgSrc={plugin.meta.info.logos.small}
           isOpen={isVizPickerOpen}
           onClick={onToggleOpen}
-          aria-label={selectors.components.PanelEditor.toggleVizPicker}
+          data-testid={selectors.components.PanelEditor.toggleVizPicker}
+          aria-label={t('dashboard.visualization-button.aria-label-change-visualization', 'Change visualization')}
+          variant="canvas"
           fullWidth
         >
           {plugin.meta.name}
         </ToolbarButton>
         <ToolbarButton
-          tooltip={isPanelOptionsVisible ? 'Close options pane' : 'Show options pane'}
+          tooltip={
+            isPanelOptionsVisible
+              ? t('dashboard.visualization-button.tooltip-close', 'Close options pane')
+              : t('dashboard.visualization-button.tooltip-show', 'Show options pane')
+          }
           icon={isPanelOptionsVisible ? 'angle-right' : 'angle-left'}
           onClick={onToggleOptionsPane}
-          aria-label={selectors.components.PanelEditor.toggleVizOptions}
+          variant="canvas"
+          data-testid={selectors.components.PanelEditor.toggleVizOptions}
+          aria-label={
+            isPanelOptionsVisible
+              ? t('dashboard.visualization-button.aria-label-close', 'Close options pane')
+              : t('dashboard.visualization-button.aria-label-show', 'Show options pane')
+          }
         />
       </ButtonGroup>
     </div>
@@ -59,14 +75,12 @@ export const VisualizationButton: FC<Props> = ({ panel }) => {
 
 VisualizationButton.displayName = 'VisualizationTab';
 
-const getStyles = (theme: GrafanaTheme) => {
-  return {
-    wrapper: css`
-      display: flex;
-      flex-direction: column;
-    `,
-    vizButton: css`
-      text-align: left;
-    `,
-  };
+const styles = {
+  wrapper: css({
+    display: 'flex',
+    flexDirection: 'column',
+  }),
+  vizButton: css({
+    textAlign: 'left',
+  }),
 };

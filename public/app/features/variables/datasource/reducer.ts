@@ -1,24 +1,22 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { DataSourceInstanceSettings } from '@grafana/data';
 
-import { DataSourceVariableModel, initialVariableModelState, VariableOption, VariableRefresh } from '../types';
 import {
-  ALL_VARIABLE_TEXT,
-  ALL_VARIABLE_VALUE,
-  getInstanceState,
-  initialVariablesState,
-  VariablePayload,
-  VariablesState,
-} from '../state/types';
+  DataSourceInstanceSettings,
+  DataSourceVariableModel,
+  matchPluginId,
+  VariableOption,
+  VariableRefresh,
+} from '@grafana/data';
 
-export interface DataSourceVariableEditorState {
-  dataSourceTypes: Array<{ text: string; value: string }>;
-}
+import { ALL_VARIABLE_TEXT, ALL_VARIABLE_VALUE } from '../constants';
+import { getInstanceState } from '../state/selectors';
+import { initialVariablesState, VariablePayload, VariablesState } from '../state/types';
+import { initialVariableModelState } from '../types';
 
 export const initialDataSourceVariableModelState: DataSourceVariableModel = {
   ...initialVariableModelState,
   type: 'datasource',
-  current: {} as VariableOption,
+  current: {},
   regex: '',
   options: [],
   query: '',
@@ -37,16 +35,20 @@ export const dataSourceVariableSlice = createSlice({
     ) => {
       const { sources, regex } = action.payload.data;
       const options: VariableOption[] = [];
-      const instanceState = getInstanceState<DataSourceVariableModel>(state, action.payload.id);
+      const instanceState = getInstanceState(state, action.payload.id);
+      if (instanceState.type !== 'datasource') {
+        return;
+      }
+
       for (let i = 0; i < sources.length; i++) {
         const source = sources[i];
-        // must match on type
-        if (source.meta.id !== instanceState.query) {
+
+        if (!matchPluginId(instanceState.query, source.meta)) {
           continue;
         }
 
         if (isValid(source, regex)) {
-          options.push({ text: source.name, value: source.name, selected: false });
+          options.push({ text: source.name, value: source.uid, selected: false });
         }
 
         if (isDefault(source, regex)) {

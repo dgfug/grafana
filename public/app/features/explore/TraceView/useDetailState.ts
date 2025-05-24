@@ -1,13 +1,20 @@
-import { useCallback, useState } from 'react';
-import { DetailState } from '@jaegertracing/jaeger-ui-components';
-import { TraceLog } from '@jaegertracing/jaeger-ui-components/src/types/trace';
+import { useCallback, useState, useEffect } from 'react';
 
+import { DataFrame, TraceLog } from '@grafana/data';
+
+import { DetailState } from './components';
+import { TraceSpanReference } from './components/types/trace';
 /**
  * Keeps state of the span detail. This means whether span details are open but also state of each detail subitem
  * like logs or tags.
  */
-export function useDetailState() {
+export function useDetailState(frame: DataFrame) {
   const [detailStates, setDetailStates] = useState(new Map<string, DetailState>());
+
+  // Clear detail state when new trace arrives
+  useEffect(() => {
+    setDetailStates(new Map<string, DetailState>());
+  }, [frame, setDetailStates]);
 
   const toggleDetail = useCallback(
     function toggleDetail(spanID: string) {
@@ -36,6 +43,20 @@ export function useDetailState() {
     [detailStates]
   );
 
+  const detailReferenceItemToggle = useCallback(
+    function detailReferenceItemToggle(spanID: string, reference: TraceSpanReference) {
+      const old = detailStates.get(spanID);
+      if (!old) {
+        return;
+      }
+      const detailState = old.toggleReferenceItem(reference);
+      const newDetailStates = new Map(detailStates);
+      newDetailStates.set(spanID, detailState);
+      return setDetailStates(newDetailStates);
+    },
+    [detailStates]
+  );
+
   return {
     detailStates,
     toggleDetail,
@@ -52,6 +73,7 @@ export function useDetailState() {
       (spanID: string) => makeDetailSubsectionToggle('stackTraces', detailStates, setDetailStates)(spanID),
       [detailStates]
     ),
+    detailReferenceItemToggle,
     detailReferencesToggle: useCallback(
       (spanID: string) => makeDetailSubsectionToggle('references', detailStates, setDetailStates)(spanID),
       [detailStates]

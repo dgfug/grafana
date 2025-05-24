@@ -1,22 +1,24 @@
-import React, { FC } from 'react';
-import { Button, FilterInput } from '@grafana/ui';
+import { useTranslate } from '@grafana/i18n';
+import { FilterInput, InlineField } from '@grafana/ui';
 
 interface Props {
   searchQuery: string;
   disabled: boolean;
-  onAddClick: () => void;
   onSearchChange: (value: string) => void;
 }
 
-export const ApiKeysActionBar: FC<Props> = ({ searchQuery, disabled, onAddClick, onSearchChange }) => {
+export const ApiKeysActionBar = ({ searchQuery, disabled, onSearchChange }: Props) => {
+  const { t } = useTranslate();
+
   return (
     <div className="page-action-bar">
-      <div className="gf-form gf-form--grow">
-        <FilterInput placeholder="Search keys" value={searchQuery} onChange={onSearchChange} />
-      </div>
-      <Button className="pull-right" onClick={onAddClick} disabled={disabled}>
-        Add API key
-      </Button>
+      <InlineField grow>
+        <FilterInput
+          placeholder={t('api-keys.api-keys-action-bar.placeholder-search-keys', 'Search keys')}
+          value={searchQuery}
+          onChange={onSearchChange}
+        />
+      </InlineField>
     </div>
   );
 };

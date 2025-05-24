@@ -9,7 +9,7 @@ import (
 )
 
 func TestApplyRoute_interpolateAuthParams(t *testing.T) {
-	tokenAuth := &plugins.JwtTokenAuth{
+	tokenAuth := &plugins.JWTTokenAuth{
 		Url: "https://login.server.com/{{.JsonData.tenantId}}/oauth2/token",
 		Scopes: []string{
 			"https://www.testapi.com/auth/Read.All",
@@ -23,7 +23,7 @@ func TestApplyRoute_interpolateAuthParams(t *testing.T) {
 	}
 
 	validData := templateData{
-		JsonData: map[string]interface{}{
+		JsonData: map[string]any{
 			"clientEmail": "test@test.com",
 			"tokenUri":    "login.url.com/token",
 			"tenantId":    "f09c86ac",
@@ -34,11 +34,11 @@ func TestApplyRoute_interpolateAuthParams(t *testing.T) {
 	}
 
 	emptyData := templateData{
-		JsonData:       map[string]interface{}{},
+		JsonData:       map[string]any{},
 		SecureJsonData: map[string]string{},
 	}
 
-	t.Run("should interpolate JwtTokenAuth struct using given JsonData", func(t *testing.T) {
+	t.Run("should interpolate JWTTokenAuth struct using given JsonData", func(t *testing.T) {
 		interpolated, err := interpolateAuthParams(tokenAuth, validData)
 		require.NoError(t, err)
 		require.NotNil(t, interpolated)
@@ -54,7 +54,7 @@ func TestApplyRoute_interpolateAuthParams(t *testing.T) {
 		assert.Equal(t, "testkey", interpolated.Params["private_key"])
 	})
 
-	t.Run("should return Nil if given JwtTokenAuth is Nil", func(t *testing.T) {
+	t.Run("should return Nil if given JWTTokenAuth is Nil", func(t *testing.T) {
 		interpolated, err := interpolateAuthParams(nil, validData)
 		require.NoError(t, err)
 		require.Nil(t, interpolated)

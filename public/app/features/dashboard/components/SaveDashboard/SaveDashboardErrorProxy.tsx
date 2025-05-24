@@ -1,44 +1,52 @@
-import React, { useEffect } from 'react';
-import { Button, ConfirmModal, Modal, stylesFactory, useTheme } from '@grafana/ui';
-import { GrafanaTheme } from '@grafana/data';
 import { css } from '@emotion/css';
-import { DashboardModel } from 'app/features/dashboard/state';
-import { useDashboardSave } from './useDashboardSave';
-import { SaveDashboardModalProps } from './types';
+import * as React from 'react';
+
+import { GrafanaTheme2 } from '@grafana/data';
+import { Trans, useTranslate } from '@grafana/i18n';
+import { config, FetchError } from '@grafana/runtime';
+import { Dashboard } from '@grafana/schema';
+import { Button, ConfirmModal, Modal, useStyles2 } from '@grafana/ui';
+
+import { DashboardModel } from '../../state/DashboardModel';
+
 import { SaveDashboardAsButton } from './SaveDashboardButton';
+import { SaveDashboardModalProps } from './types';
+import { useDashboardSave } from './useDashboardSave';
 
 interface SaveDashboardErrorProxyProps {
   /** original dashboard */
   dashboard: DashboardModel;
   /** dashboard save model with applied modifications, i.e. title */
-  dashboardSaveModel: any;
-  error: any;
+  dashboardSaveModel: Dashboard;
+  error: FetchError;
   onDismiss: () => void;
+  setErrorIsHandled: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-export const SaveDashboardErrorProxy: React.FC<SaveDashboardErrorProxyProps> = ({
+export const SaveDashboardErrorProxy = ({
   dashboard,
   dashboardSaveModel,
   error,
   onDismiss,
-}) => {
-  const { onDashboardSave } = useDashboardSave(dashboard);
-
-  useEffect(() => {
-    if (error.data && isHandledError(error.data.status)) {
-      error.isHandled = true;
-    }
-  }, [error]);
+  setErrorIsHandled,
+}: SaveDashboardErrorProxyProps) => {
+  const { onDashboardSave } = useDashboardSave();
+  const { t } = useTranslate();
+  const isRestoreDashboardsEnabled = config.featureToggles.restoreDashboards;
 
   return (
     <>
       {error.data && error.data.status === 'version-mismatch' && (
         <ConfirmModal
           isOpen={true}
-          title="Conflict"
+          title={t('dashboard.save-dashboard-error-proxy.title-version-mismatch', 'Conflict')}
           body={
             <div>
-              Someone else has updated this dashboard <br /> <small>Would you still like to save this dashboard?</small>
+              <Trans i18nKey="dashboard.save-dashboard-error-proxy.body-version-mismatch">
+                Someone else has updated this dashboard
+                <br />
+                <small>Would you still like to save this dashboard?</small>
+              </Trans>
             </div>
           }
           confirmText="Save and overwrite"
@@ -50,49 +58,88 @@ export const SaveDashboardErrorProxy: React.FC<SaveDashboardErrorProxyProps> = (
         />
       )}
       {error.data && error.data.status === 'name-exists' && (
-        <ConfirmModal
-          isOpen={true}
-          title="Conflict"
-          body={
-            <div>
-              A dashboard with the same name in selected folder already exists. <br />
-              <small>Would you still like to save this dashboard?</small>
-            </div>
-          }
-          confirmText="Save and overwrite"
-          onConfirm={async () => {
-            await onDashboardSave(dashboardSaveModel, { overwrite: true }, dashboard);
-            onDismiss();
-          }}
-          onDismiss={onDismiss}
-        />
+        <>
+          {isRestoreDashboardsEnabled ? (
+            <Modal
+              isOpen={true}
+              title={t('save-dashboards.name-exists.title', 'Dashboard name already exists')}
+              onDismiss={onDismiss}
+            >
+              <p>
+                <Trans i18nKey="save-dashboards.name-exists.message-info">
+                  A dashboard with the same name in the selected folder already exists, including recently deleted
+                  dashboards.
+                </Trans>
+              </p>
+              <p>
+                <Trans i18nKey="save-dashboards.name-exists.message-suggestion">
+                  Please choose a different name or folder.
+                </Trans>
+              </p>
+            </Modal>
+          ) : (
+            <ConfirmModal
+              isOpen={true}
+              title={t('dashboard.save-dashboard-error-proxy.title-name-exists', 'Conflict')}
+              body={
+                <div>
+                  <Trans i18nKey="dashboard.save-dashboard-error-proxy.body-name-exists">
+                    A dashboard with the same name in selected folder already exists.
+                    <br />
+                    <small>Would you still like to save this dashboard?</small>
+                  </Trans>
+                </div>
+              }
+              confirmText="Save and overwrite"
+              onConfirm={async () => {
+                await onDashboardSave(dashboardSaveModel, { overwrite: true }, dashboard);
+                onDismiss();
+              }}
+              onDismiss={onDismiss}
+            />
+          )}
+        </>
       )}
       {error.data && error.data.status === 'plugin-dashboard' && (
-        <ConfirmPluginDashboardSaveModal dashboard={dashboard} onDismiss={onDismiss} />
+        <ConfirmPluginDashboardSaveModal
+          dashboard={dashboard}
+          onDismiss={() => {
+            setErrorIsHandled(true);
+            onDismiss();
+          }}
+        />
       )}
     </>
   );
 };
 
-const ConfirmPluginDashboardSaveModal: React.FC<SaveDashboardModalProps> = ({ onDismiss, dashboard }) => {
-  const theme = useTheme();
-  const { onDashboardSave } = useDashboardSave(dashboard);
-  const styles = getConfirmPluginDashboardSaveModalStyles(theme);
+const ConfirmPluginDashboardSaveModal = ({ onDismiss, dashboard }: SaveDashboardModalProps) => {
+  const { onDashboardSave } = useDashboardSave();
+  const { t } = useTranslate();
+  const styles = useStyles2(getConfirmPluginDashboardSaveModalStyles);
 
   return (
-    <Modal className={styles.modal} title="Plugin dashboard" icon="copy" isOpen={true} onDismiss={onDismiss}>
+    <Modal
+      className={styles.modal}
+      title={t('dashboard.confirm-plugin-dashboard-save-modal.title-plugin-dashboard', 'Plugin dashboard')}
+      icon="copy"
+      isOpen={true}
+      onDismiss={onDismiss}
+    >
       <div className={styles.modalText}>
-        Your changes will be lost when you update the plugin.
-        <br />
-        <small>
-          Use <strong>Save As</strong> to create custom version.
-        </small>
+        <Trans i18nKey="dashboard.confirm-plugin-dashboard-save-modal.body-plugin-dashboard">
+          Your changes will be lost when you update the plugin.
+          <br />
+          <small>
+            Use <strong>Save As</strong> to create custom version.
+          </small>
+        </Trans>
       </div>
       <Modal.ButtonRow>
         <Button variant="secondary" onClick={onDismiss} fill="outline">
-          Cancel
+          <Trans i18nKey="dashboard.confirm-plugin-dashboard-save-modal.cancel">Cancel</Trans>
         </Button>
-        <SaveDashboardAsButton dashboard={dashboard} onSaveSuccess={onDismiss} />
+        <SaveDashboardAsButton onClick={onDismiss} dashboard={dashboard} onSaveSuccess={onDismiss} />
         <Button
           variant="destructive"
           onClick={async () => {
@@ -100,14 +147,14 @@ const ConfirmPluginDashboardSaveModal: React.FC<SaveDashboardModalProps> = ({ on
             onDismiss();
           }}
         >
-          Overwrite
+          <Trans i18nKey="dashboard.confirm-plugin-dashboard-save-modal.overwrite">Overwrite</Trans>
         </Button>
       </Modal.ButtonRow>
     </Modal>
   );
 };
 
-const isHandledError = (errorStatus: string) => {
+export const proxyHandlesError = (errorStatus: string) => {
   switch (errorStatus) {
     case 'version-mismatch':
     case 'name-exists':
@@ -119,21 +166,20 @@ const isHandledError = (errorStatus: string) => {
   }
 };
 
-const getConfirmPluginDashboardSaveModalStyles = stylesFactory((theme: GrafanaTheme) => ({
-  modal: css`
-    width: 500px;
-  `,
-  modalText: css`
-    font-size: ${theme.typography.heading.h4};
-    color: ${theme.colors.link};
-    margin-bottom: calc(${theme.spacing.d} * 2);
-    padding-top: ${theme.spacing.d};
-  `,
-  modalButtonRow: css`
-    margin-bottom: 14px;
-    a,
-    button {
-      margin-right: ${theme.spacing.d};
-    }
-  `,
-}));
+const getConfirmPluginDashboardSaveModalStyles = (theme: GrafanaTheme2) => ({
+  modal: css({
+    width: '500px',
+  }),
+  modalText: css({
+    fontSize: theme.typography.h4.fontSize,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing(4),
+    paddingTop: theme.spacing(2),
+  }),
+  modalButtonRow: css({
+    marginBottom: '14px',
+    'a, button': {
+      marginRight: theme.spacing(2),
+    },
+  }),
+});

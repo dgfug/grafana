@@ -1,25 +1,15 @@
-import resolve from '@rollup/plugin-node-resolve';
-import sourceMaps from 'rollup-plugin-sourcemaps';
-import { terser } from 'rollup-plugin-terser';
+import { createRequire } from 'node:module';
 
-const pkg = require('./package.json');
+import { cjsOutput, entryPoint, esmOutput, plugins, tsDeclarationOutput } from '../rollup.config.parts';
 
-const libraryName = pkg.name;
+const rq = createRequire(import.meta.url);
+const pkg = rq('./package.json');
 
-const buildCjsPackage = ({ env }) => {
-  return {
-    input: `compiled/index.js`,
-    output: [
-      {
-        file: `dist/index.${env}.js`,
-        name: libraryName,
-        format: 'cjs',
-        sourcemap: true,
-        exports: 'named',
-        globals: {},
-      },
-    ],
-    plugins: [resolve(), sourceMaps(), env === 'production' && terser()],
-  };
-};
-export default [buildCjsPackage({ env: 'development' }), buildCjsPackage({ env: 'production' })];
+export default [
+  {
+    input: entryPoint,
+    plugins,
+    output: [cjsOutput(pkg), esmOutput(pkg, 'grafana-e2e-selectors')],
+  },
+  tsDeclarationOutput(pkg),
+];

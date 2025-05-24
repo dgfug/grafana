@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/data"
-
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,7 +61,7 @@ func (t *testProcessor) Type() string {
 	return "test"
 }
 
-func (t *testProcessor) Process(_ context.Context, _ ProcessorVars, frame *data.Frame) (*data.Frame, error) {
+func (t *testProcessor) ProcessFrame(_ context.Context, _ Vars, frame *data.Frame) (*data.Frame, error) {
 	return frame, nil
 }
 
@@ -75,7 +74,7 @@ func (t *testOutputter) Type() string {
 	return "test"
 }
 
-func (t *testOutputter) Output(_ context.Context, _ OutputVars, frame *data.Frame) ([]*ChannelFrame, error) {
+func (t *testOutputter) OutputFrame(_ context.Context, _ Vars, frame *data.Frame) ([]*ChannelFrame, error) {
 	if t.err != nil {
 		return nil, t.err
 	}
@@ -88,9 +87,9 @@ func TestPipeline(t *testing.T) {
 	p, err := New(&testRuleGetter{
 		rules: map[string]*LiveChannelRule{
 			"stream/test/xxx": {
-				Converter: &testConverter{"", data.NewFrame("test")},
-				Processor: &testProcessor{},
-				Outputter: outputter,
+				Converter:       &testConverter{"", data.NewFrame("test")},
+				FrameProcessors: []FrameProcessor{&testProcessor{}},
+				FrameOutputters: []FrameOutputter{outputter},
 			},
 		},
 	})
@@ -107,9 +106,9 @@ func TestPipeline_OutputError(t *testing.T) {
 	p, err := New(&testRuleGetter{
 		rules: map[string]*LiveChannelRule{
 			"stream/test/xxx": {
-				Converter: &testConverter{"", data.NewFrame("test")},
-				Processor: &testProcessor{},
-				Outputter: outputter,
+				Converter:       &testConverter{"", data.NewFrame("test")},
+				FrameProcessors: []FrameProcessor{&testProcessor{}},
+				FrameOutputters: []FrameOutputter{outputter},
 			},
 		},
 	})
@@ -123,15 +122,19 @@ func TestPipeline_Recursion(t *testing.T) {
 		rules: map[string]*LiveChannelRule{
 			"stream/test/xxx": {
 				Converter: &testConverter{"", data.NewFrame("test")},
-				Outputter: NewRedirectOutput(RedirectOutputConfig{
-					Channel: "stream/test/yyy",
-				}),
+				FrameOutputters: []FrameOutputter{
+					NewRedirectFrameOutput(RedirectOutputConfig{
+						Channel: "stream/test/yyy",
+					}),
+				},
 			},
 			"stream/test/yyy": {
 				Converter: &testConverter{"", data.NewFrame("test")},
-				Outputter: NewRedirectOutput(RedirectOutputConfig{
-					Channel: "stream/test/xxx",
-				}),
+				FrameOutputters: []FrameOutputter{
+					NewRedirectFrameOutput(RedirectOutputConfig{
+						Channel: "stream/test/xxx",
+					}),
+				},
 			},
 		},
 	})

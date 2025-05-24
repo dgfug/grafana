@@ -1,15 +1,47 @@
-import { DashboardAcl } from './acl';
-import { DataQuery, PanelPlugin } from '@grafana/data';
+import { DataQuery } from '@grafana/data';
+import { Dashboard, DataSourceRef } from '@grafana/schema';
+import { ObjectMeta } from 'app/features/apiserver/types';
 import { DashboardModel } from 'app/features/dashboard/state/DashboardModel';
-import { AngularComponent } from '@grafana/runtime';
+import { ProvisioningPreview } from 'app/features/provisioning/types';
+
+export interface HomeDashboardRedirectDTO {
+  redirectUri: string;
+}
 
 export interface DashboardDTO {
-  redirectUri?: string;
   dashboard: DashboardDataDTO;
   meta: DashboardMeta;
 }
 
+export interface ImportDashboardResponseDTO {
+  uid: string;
+  pluginId: string;
+  title: string;
+  imported: boolean;
+  importedRevision?: number;
+  importedUri: string;
+  importedUrl: string;
+  slug: string;
+  dashboardId: number;
+  folderId: number;
+  folderUid: string;
+  description: string;
+  path: string;
+  removed: boolean;
+}
+
+export interface SaveDashboardResponseDTO {
+  id: number;
+  slug: string;
+  status: string;
+  uid: string;
+  url: string;
+  version: number;
+}
+
 export interface DashboardMeta {
+  slug?: string;
+  uid?: string;
   canSave?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
@@ -17,18 +49,18 @@ export interface DashboardMeta {
   canStar?: boolean;
   canAdmin?: boolean;
   url?: string;
-  folderId?: number;
-  fromExplore?: boolean;
+  folderUid?: string;
   canMakeEditable?: boolean;
-  submenuEnabled?: boolean;
   provisioned?: boolean;
   provisionedExternalId?: string;
   isStarred?: boolean;
   showSettings?: boolean;
   expires?: string;
+  isFolder?: boolean;
   isSnapshot?: boolean;
   folderTitle?: string;
   folderUrl?: string;
+  folderId?: number;
   created?: string;
   createdBy?: string;
   updated?: string;
@@ -36,17 +68,52 @@ export interface DashboardMeta {
   fromScript?: boolean;
   fromFile?: boolean;
   hasUnsavedFolderChange?: boolean;
+  annotationsPermissions?: AnnotationsPermissions;
+  publicDashboardEnabled?: boolean;
+  isEmbedded?: boolean;
+  isNew?: boolean;
+  version?: number;
+
+  // When loaded from kubernetes, we stick the raw metadata here
+  // yes weird, but this means all the editor structures can exist unchanged
+  // until we use the resource as the main container
+  k8s?: Partial<ObjectMeta>;
+
+  // If the dashboard was loaded from a remote repository
+  provisioning?: ProvisioningPreview;
+
+  // This is a property added specifically for edge cases where dashboards should be reloaded on scopes, time range or variables changes
+  // This property is not persisted in the DB but its existence is controlled by the API
+  reloadOnParamsChange?: boolean;
 }
 
-export interface DashboardDataDTO {
+export interface AnnotationActions {
+  canAdd: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export interface AnnotationsPermissions {
+  dashboard: AnnotationActions;
+  organization: AnnotationActions;
+}
+
+// FIXME: This should not override Dashboard types
+export interface DashboardDataDTO extends Dashboard {
   title: string;
+  uid: string;
+  panels?: any[];
 }
 
 export enum DashboardRoutes {
   Home = 'home-dashboard',
   New = 'new-dashboard',
   Normal = 'normal-dashboard',
+  Provisioning = 'provisioning-dashboard',
   Scripted = 'scripted-dashboard',
+  Public = 'public-dashboard',
+  Embedded = 'embedded-dashboard',
+  Report = 'report-dashboard',
 }
 
 export enum DashboardInitPhase {
@@ -59,12 +126,10 @@ export enum DashboardInitPhase {
 
 export interface DashboardInitError {
   message: string;
-  error: any;
+  error: unknown;
 }
 
 export enum KioskMode {
-  Off = 'off',
-  TV = 'tv',
   Full = 'full',
 }
 
@@ -75,19 +140,15 @@ export interface QueriesToUpdateOnDashboardLoad {
   queries: DataQuery[];
 }
 
-export interface PanelState {
-  pluginId: string;
-  plugin?: PanelPlugin;
-  angularComponent?: AngularComponent | null;
-  instanceState?: any | null;
-}
-
 export interface DashboardState {
   getModel: GetMutableDashboardModelFn;
   initPhase: DashboardInitPhase;
-  isInitSlow: boolean;
+  initialDatasource?: DataSourceRef['uid'];
   initError: DashboardInitError | null;
-  permissions: DashboardAcl[];
-  modifiedQueries: QueriesToUpdateOnDashboardLoad | null;
-  panels: { [id: string]: PanelState };
+}
+
+export const DASHBOARD_FROM_LS_KEY = 'DASHBOARD_FROM_LS_KEY';
+
+export function isRedirectResponse(dto: DashboardDTO | HomeDashboardRedirectDTO): dto is HomeDashboardRedirectDTO {
+  return 'redirectUri' in dto;
 }

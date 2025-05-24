@@ -1,16 +1,21 @@
 import { DataFrame, PanelData, Field, getFieldDisplayName, ReducerID } from '@grafana/data';
+import { config } from '@grafana/runtime';
+import {
+  ResourceDimensionConfig,
+  ScaleDimensionConfig,
+  TextDimensionConfig,
+  ColorDimensionConfig,
+  ScalarDimensionConfig,
+} from '@grafana/schema';
 import {
   getColorDimension,
   getScaledDimension,
   getTextDimension,
   getResourceDimension,
-  ColorDimensionConfig,
   DimensionSupplier,
-  ResourceDimensionConfig,
-  ScaleDimensionConfig,
-  TextDimensionConfig,
 } from 'app/features/dimensions';
-import { config } from '@grafana/runtime';
+
+import { getScalarDimension } from './scalar';
 
 export function getColorDimensionFromData(
   data: PanelData | undefined,
@@ -40,6 +45,21 @@ export function getScaleDimensionFromData(
     }
   }
   return getScaledDimension(undefined, cfg);
+}
+
+export function getScalarDimensionFromData(
+  data: PanelData | undefined,
+  cfg: ScalarDimensionConfig
+): DimensionSupplier<number> {
+  if (data?.series && cfg.field) {
+    for (const frame of data.series) {
+      const d = getScalarDimension(frame, cfg);
+      if (!d.isAssumed || data.series.length === 1) {
+        return d;
+      }
+    }
+  }
+  return getScalarDimension(undefined, cfg);
 }
 
 export function getResourceDimensionFromData(
@@ -73,23 +93,11 @@ export function getTextDimensionFromData(
 }
 
 export function findField(frame?: DataFrame, name?: string): Field | undefined {
-  if (!frame || !name?.length) {
-    return undefined;
-  }
-
-  for (const field of frame.fields) {
-    if (name === field.name) {
-      return field;
-    }
-    const disp = getFieldDisplayName(field, frame);
-    if (name === disp) {
-      return field;
-    }
-  }
-  return undefined;
+  const idx = findFieldIndex(name, frame);
+  return idx == null ? undefined : frame!.fields[idx];
 }
 
-export function findFieldIndex(frame?: DataFrame, name?: string): number | undefined {
+export function findFieldIndex(name?: string, frame?: DataFrame, frames?: DataFrame[]): number | undefined {
   if (!frame || !name?.length) {
     return undefined;
   }
@@ -99,7 +107,7 @@ export function findFieldIndex(frame?: DataFrame, name?: string): number | undef
     if (name === field.name) {
       return i;
     }
-    const disp = getFieldDisplayName(field, frame);
+    const disp = getFieldDisplayName(field, frame, frames);
     if (name === disp) {
       return i;
     }
@@ -112,17 +120,17 @@ export function getLastNotNullFieldValue<T>(field: Field): T {
   if (calcs) {
     const v = calcs[ReducerID.lastNotNull];
     if (v != null) {
-      return v as T;
+      return v;
     }
   }
 
   const data = field.values;
   let idx = data.length - 1;
   while (idx >= 0) {
-    const v = data.get(idx--);
+    const v = data[idx--];
     if (v != null) {
       return v;
     }
   }
-  return undefined as any;
+  return undefined as T;
 }

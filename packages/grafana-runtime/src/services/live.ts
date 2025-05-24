@@ -1,13 +1,14 @@
+import { Observable } from 'rxjs';
+
 import {
-  DataFrame,
+  DataFrameJSON,
+  DataQueryRequest,
   DataQueryResponse,
   LiveChannelAddress,
-  LiveChannelConfig,
   LiveChannelEvent,
   LiveChannelPresenceStatus,
   StreamingFrameOptions,
 } from '@grafana/data';
-import { Observable } from 'rxjs';
 
 /**
  * @alpha -- experimental
@@ -16,15 +17,40 @@ export interface LiveDataFilter {
   fields?: string[];
 }
 
+// StreamingFrameAction and StreamingFrameOptions are now in @grafana/data
+export { StreamingFrameAction, type StreamingFrameOptions } from '@grafana/data';
+
 /**
  * @alpha
  */
 export interface LiveDataStreamOptions {
   addr: LiveChannelAddress;
-  frame?: DataFrame; // initial results
+  frame?: DataFrameJSON; // initial results
   key?: string;
-  buffer?: StreamingFrameOptions;
+  buffer?: Partial<StreamingFrameOptions>;
   filter?: LiveDataFilter;
+}
+
+/**
+ * @alpha -- experimental: send a normal query request over websockt
+ */
+export interface LiveQueryDataOptions {
+  request: DataQueryRequest;
+  body: unknown; // processed queries, same as sent to `/api/query/ds`
+}
+
+/**
+ * @alpha -- experimental
+ */
+export interface LivePublishOptions {
+  /**
+   * Publish the data over the websocket instead of the HTTP API.
+   *
+   * This is not recommended for most use cases.
+   *
+   * @experimental
+   */
+  useSocket?: boolean;
 }
 
 /**
@@ -35,16 +61,6 @@ export interface GrafanaLiveSrv {
    * Listen for changes to the main service
    */
   getConnectionState(): Observable<boolean>;
-
-  /**
-   * Get a channel.  If the scope, namespace, or path is invalid, a shutdown
-   * channel will be returned with an error state indicated in its status.
-   *
-   * This is a singleton instance that stays active until explicitly shutdown.
-   * Multiple requests for this channel will return the same object until
-   * the channel is shutdown
-   */
-  getChannelInfo(address: LiveChannelAddress): Promise<LiveChannelConfig>;
 
   /**
    * Watch for messages in a channel
@@ -68,7 +84,7 @@ export interface GrafanaLiveSrv {
    *
    * @alpha -- experimental
    */
-  publish(address: LiveChannelAddress, data: any): Promise<any>;
+  publish(address: LiveChannelAddress, data: unknown, options?: LivePublishOptions): Promise<unknown>;
 }
 
 let singletonInstance: GrafanaLiveSrv;

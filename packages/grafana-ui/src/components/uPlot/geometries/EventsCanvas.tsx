@@ -1,7 +1,12 @@
-import { DataFrame, DataFrameFieldIndex } from '@grafana/data';
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import * as React from 'react';
 import { useMountedState } from 'react-use';
+import uPlot from 'uplot';
+
+import { DataFrame, DataFrameFieldIndex } from '@grafana/data';
+
 import { UPlotConfigBuilder } from '../config/UPlotConfigBuilder';
+
 import { Marker } from './Marker';
 import { XYCanvas } from './XYCanvas';
 

@@ -1,8 +1,16 @@
 import { merge, Observable, ReplaySubject, Subject, Subscription, timer, Unsubscribable } from 'rxjs';
 import { finalize, map, mapTo, mergeAll, reduce, share, takeUntil } from 'rxjs/operators';
-import { AnnotationQuery } from '@grafana/data';
 
+import { AnnotationQuery } from '@grafana/data';
+import { RefreshEvent } from '@grafana/runtime';
 import { dedupAnnotations } from 'app/features/annotations/events_processing';
+
+import { getTimeSrv, TimeSrv } from '../../../dashboard/services/TimeSrv';
+import { DashboardModel } from '../../../dashboard/state/DashboardModel';
+
+import { AnnotationsWorker } from './AnnotationsWorker';
+import { SnapshotWorker } from './SnapshotWorker';
+import { UnifiedAlertStatesWorker } from './UnifiedAlertStatesWorker';
 import {
   DashboardQueryRunner,
   DashboardQueryRunnerOptions,
@@ -10,13 +18,7 @@ import {
   DashboardQueryRunnerWorker,
   DashboardQueryRunnerWorkerResult,
 } from './types';
-import { AlertStatesWorker } from './AlertStatesWorker';
-import { SnapshotWorker } from './SnapshotWorker';
-import { AnnotationsWorker } from './AnnotationsWorker';
 import { getAnnotationsByPanelId } from './utils';
-import { DashboardModel } from '../../../dashboard/state';
-import { getTimeSrv, TimeSrv } from '../../../dashboard/services/TimeSrv';
-import { RefreshEvent } from '../../../../types/events';
 
 class DashboardQueryRunnerImpl implements DashboardQueryRunner {
   private readonly results: ReplaySubject<DashboardQueryRunnerWorkerResult>;
@@ -29,7 +31,7 @@ class DashboardQueryRunnerImpl implements DashboardQueryRunner {
     private readonly dashboard: DashboardModel,
     private readonly timeSrv: TimeSrv = getTimeSrv(),
     private readonly workers: DashboardQueryRunnerWorker[] = [
-      new AlertStatesWorker(),
+      new UnifiedAlertStatesWorker(),
       new SnapshotWorker(),
       new AnnotationsWorker(),
     ]
@@ -41,7 +43,7 @@ class DashboardQueryRunnerImpl implements DashboardQueryRunner {
     this.executeRun = this.executeRun.bind(this);
     this.results = new ReplaySubject<DashboardQueryRunnerWorkerResult>(1);
     this.runs = new Subject<DashboardQueryRunnerOptions>();
-    this.cancellationStream = new Subject<any>();
+    this.cancellationStream = new Subject<AnnotationQuery>();
     this.runsSubscription = this.runs.subscribe((options) => this.executeRun(options));
     this.eventsSubscription = dashboard.events.subscribe(RefreshEvent, (event) => {
       this.run({ dashboard: this.dashboard, range: this.timeSrv.timeRange() });

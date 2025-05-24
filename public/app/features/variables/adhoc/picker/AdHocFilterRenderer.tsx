@@ -1,37 +1,48 @@
-import React, { FC } from 'react';
-import { OperatorSegment } from './OperatorSegment';
-import { AdHocVariableFilter } from 'app/features/variables/types';
-import { SelectableValue } from '@grafana/data';
+import { AdHocVariableFilter, DataSourceRef, SelectableValue } from '@grafana/data';
+
 import { AdHocFilterKey } from './AdHocFilterKey';
 import { AdHocFilterValue } from './AdHocFilterValue';
+import { OperatorSegment } from './OperatorSegment';
 
 interface Props {
-  datasource: string;
+  datasource: DataSourceRef;
   filter: AdHocVariableFilter;
+  allFilters: AdHocVariableFilter[];
   onKeyChange: (item: SelectableValue<string | null>) => void;
   onOperatorChange: (item: SelectableValue<string>) => void;
   onValueChange: (item: SelectableValue<string>) => void;
   placeHolder?: string;
+  disabled?: boolean;
 }
 
-export const AdHocFilterRenderer: FC<Props> = ({
+export const AdHocFilterRenderer = ({
   datasource,
   filter: { key, operator, value },
   onKeyChange,
   onOperatorChange,
   onValueChange,
   placeHolder,
-}) => {
+  allFilters,
+  disabled,
+}: Props) => {
   return (
     <>
-      <AdHocFilterKey datasource={datasource} filterKey={key} onChange={onKeyChange} />
+      <AdHocFilterKey
+        disabled={disabled}
+        datasource={datasource}
+        filterKey={key}
+        onChange={onKeyChange}
+        allFilters={allFilters}
+      />
       <div className="gf-form">
-        <OperatorSegment value={operator} onChange={onOperatorChange} />
+        <OperatorSegment disabled={disabled} value={operator} onChange={onOperatorChange} />
       </div>
       <AdHocFilterValue
+        disabled={disabled}
         datasource={datasource}
         filterKey={key}
         filterValue={value}
+        allFilters={allFilters}
         onChange={onValueChange}
         placeHolder={placeHolder}
       />

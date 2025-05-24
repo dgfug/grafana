@@ -3,362 +3,467 @@ package libraryelements
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/macaron.v1"
 
-	"github.com/grafana/grafana/pkg/models"
+	"github.com/grafana/grafana/pkg/services/accesscontrol"
+	"github.com/grafana/grafana/pkg/services/accesscontrol/acimpl"
+	"github.com/grafana/grafana/pkg/services/accesscontrol/actest"
+	"github.com/grafana/grafana/pkg/services/dashboards"
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/folder/folderimpl"
+	"github.com/grafana/grafana/pkg/services/libraryelements/model"
+	"github.com/grafana/grafana/pkg/services/org"
+	"github.com/grafana/grafana/pkg/web"
 )
 
-func TestLibraryElementPermissions(t *testing.T) {
-	var defaultPermissions = []folderACLItem{}
-	var adminOnlyPermissions = []folderACLItem{{models.ROLE_ADMIN, models.PERMISSION_EDIT}}
-	var editorOnlyPermissions = []folderACLItem{{models.ROLE_EDITOR, models.PERMISSION_EDIT}}
-	var editorAndViewerPermissions = []folderACLItem{{models.ROLE_EDITOR, models.PERMISSION_EDIT}, {models.ROLE_VIEWER, models.PERMISSION_EDIT}}
-	var viewerOnlyPermissions = []folderACLItem{{models.ROLE_VIEWER, models.PERMISSION_EDIT}}
-	var everyonePermissions = []folderACLItem{{models.ROLE_ADMIN, models.PERMISSION_EDIT}, {models.ROLE_EDITOR, models.PERMISSION_EDIT}, {models.ROLE_VIEWER, models.PERMISSION_EDIT}}
-	var noPermissions = []folderACLItem{{models.ROLE_VIEWER, models.PERMISSION_VIEW}}
-	var folderCases = [][]folderACLItem{
-		defaultPermissions,
-		adminOnlyPermissions,
-		editorOnlyPermissions,
-		editorAndViewerPermissions,
-		viewerOnlyPermissions,
-		everyonePermissions,
-		noPermissions,
-	}
-	var defaultDesc = "default permissions"
-	var adminOnlyDesc = "admin only permissions"
-	var editorOnlyDesc = "editor only permissions"
-	var editorAndViewerDesc = "editor and viewer permissions"
-	var viewerOnlyDesc = "viewer only permissions"
-	var everyoneDesc = "everyone has editor permissions"
-	var noDesc = "everyone has view permissions"
+func TestLibraryElementPermissionsGeneralFolder(t *testing.T) {
+	testScenario(t, "When user with tries to create a library panel in the General folder, it should return correct status",
+		func(t *testing.T, sc scenarioContext) {
+			sc.reqContext.OrgRole = org.RoleViewer
+			command := getCreatePanelCommand(0, "", "Library Panel Name")
+			sc.reqContext.Req.Body = mockRequestBody(command)
+			resp := sc.service.createHandler(sc.reqContext)
+			require.Equal(t, http.StatusForbidden, resp.Status())
+
+			sc.reqContext.OrgRole = org.RoleEditor
+			sc.reqContext.Req.Body = mockRequestBody(command)
+			resp = sc.service.createHandler(sc.reqContext)
+			require.Equal(t, http.StatusOK, resp.Status())
+		})
+
+	testScenario(t, "When user tries to patch a library panel by moving it to the General folder, it should return correct status",
+		func(t *testing.T, sc scenarioContext) {
+			folder := createFolder(t, sc, "Folder", nil)
+			// nolint:staticcheck
+			command := getCreatePanelCommand(folder.ID, folder.UID, "Library Panel Name")
+			sc.reqContext.Req.Body = mockRequestBody(command)
+			resp := sc.service.createHandler(sc.reqContext)
+			result := validateAndUnMarshalResponse(t, resp)
+
+			// nolint:staticcheck
+			sc.reqContext.OrgRole = org.RoleViewer
+			cmd := model.PatchLibraryElementCommand{FolderID: 0, Version: 1, Kind: int64(model.PanelElement)}
+			sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+			sc.ctx.Req.Body = mockRequestBody(cmd)
+			resp = sc.service.patchHandler(sc.reqContext)
+			require.Equal(t, http.StatusForbidden, resp.Status())
+
+			sc.reqContext.OrgRole = org.RoleEditor
+			sc.ctx.Req.Body = mockRequestBody(cmd)
+			resp = sc.service.patchHandler(sc.reqContext)
+			require.Equal(t, http.StatusOK, resp.Status())
+		})
+
+	testScenario(t, "When user tries to patch a library panel by moving it from the General folder, it should return correct status",
+		func(t *testing.T, sc scenarioContext) {
+			folder := createFolder(t, sc, "Folder", nil)
+			command := getCreatePanelCommand(0, "", "Library Panel Name")
+			sc.reqContext.Req.Body = mockRequestBody(command)
+			sc.service.AccessControl = actest.FakeAccessControl{ExpectedEvaluate: true}
+			resp := sc.service.createHandler(sc.reqContext)
+			result := validateAndUnMarshalResponse(t, resp)
+
+			sc.reqContext.OrgRole = org.RoleViewer
+			cmd := model.PatchLibraryElementCommand{FolderUID: &folder.UID, Version: 1, Kind: int64(model.PanelElement)}
+			sc.service.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures())
+			sc.service.AccessControl.RegisterScopeAttributeResolver(dashboards.NewFolderIDScopeResolver(folderimpl.ProvideDashboardFolderStore(sc.sqlStore), sc.service.folderService))
+			sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+			sc.ctx.Req.Body = mockRequestBody(cmd)
+			resp = sc.service.patchHandler(sc.reqContext)
+			require.Equal(t, http.StatusForbidden, resp.Status())
+
+			sc.reqContext.OrgRole = org.RoleEditor
+			sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersWrite] = append(sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersWrite], dashboards.ScopeFoldersProvider.GetResourceScopeUID(folder.UID))
+			sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersWrite] = append(sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersWrite], dashboards.ScopeFoldersProvider.GetResourceScopeUID(accesscontrol.GeneralFolderUID))
+			sc.ctx.Req.Body = mockRequestBody(cmd)
+			resp = sc.service.patchHandler(sc.reqContext)
+			require.Equal(t, http.StatusOK, resp.Status())
+		})
+
+	testScenario(t, "When user tries to delete a library panel in the General folder, it should return correct status",
+		func(t *testing.T, sc scenarioContext) {
+			cmd := getCreatePanelCommand(0, "", "Library Panel Name")
+			sc.reqContext.Req.Body = mockRequestBody(cmd)
+			sc.service.AccessControl = actest.FakeAccessControl{ExpectedEvaluate: true}
+			resp := sc.service.createHandler(sc.reqContext)
+			result := validateAndUnMarshalResponse(t, resp)
+
+			sc.reqContext.OrgRole = org.RoleViewer
+			sc.service.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures())
+			sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+			resp = sc.service.deleteHandler(sc.reqContext)
+			require.Equal(t, http.StatusForbidden, resp.Status())
+
+			sc.reqContext.OrgRole = org.RoleEditor
+			resp = sc.service.deleteHandler(sc.reqContext)
+			require.Equal(t, http.StatusOK, resp.Status())
+		})
+
+	testScenario(t, "When user tries to get a library panel from General folder, it should return correct response",
+		func(t *testing.T, sc scenarioContext) {
+			sc.service.AccessControl = actest.FakeAccessControl{ExpectedEvaluate: true}
+			cmd := getCreatePanelCommand(0, "", "Library Panel in General Folder")
+			sc.reqContext.Req.Body = mockRequestBody(cmd)
+			resp := sc.service.createHandler(sc.reqContext)
+			result := validateAndUnMarshalResponse(t, resp)
+			result.Result.Meta.CreatedBy.Name = userInDbName
+			result.Result.Meta.CreatedBy.AvatarUrl = userInDbAvatar
+			result.Result.Meta.UpdatedBy.Name = userInDbName
+			result.Result.Meta.UpdatedBy.AvatarUrl = userInDbAvatar
+			result.Result.Meta.FolderName = "General"
+			result.Result.Meta.FolderUID = "general"
+			result.Result.FolderUID = "general"
+
+			sc.service.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures())
+			sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersRead] = append(sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersRead], dashboards.ScopeFoldersProvider.GetResourceScopeUID(accesscontrol.GeneralFolderUID))
+			sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+			resp = sc.service.getHandler(sc.reqContext)
+			require.Equal(t, 200, resp.Status())
+			var actual libraryElementResult
+			err := json.Unmarshal(resp.Body(), &actual)
+			require.NoError(t, err)
+			if diff := cmp.Diff(result.Result, actual.Result, getCompareOptions()...); diff != "" {
+				t.Fatalf("Result mismatch (-want +got):\n%s", diff)
+			}
+		})
+
+	testScenario(t, "When user tries to get all library panels from General folder, it should return correct response",
+		func(t *testing.T, sc scenarioContext) {
+			sc.service.AccessControl = actest.FakeAccessControl{ExpectedEvaluate: true}
+			cmd := getCreatePanelCommand(0, "", "Library Panel in General Folder")
+			sc.reqContext.Req.Body = mockRequestBody(cmd)
+			resp := sc.service.createHandler(sc.reqContext)
+			result := validateAndUnMarshalResponse(t, resp)
+			result.Result.Meta.CreatedBy.Name = userInDbName
+			result.Result.Meta.CreatedBy.AvatarUrl = userInDbAvatar
+			result.Result.Meta.UpdatedBy.Name = userInDbName
+			result.Result.Meta.UpdatedBy.AvatarUrl = userInDbAvatar
+			result.Result.Meta.FolderName = "General"
+
+			sc.service.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures())
+			sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersRead] = append(sc.reqContext.Permissions[sc.user.OrgID][dashboards.ActionFoldersRead], dashboards.ScopeFoldersProvider.GetResourceScopeUID(accesscontrol.GeneralFolderUID))
+			resp = sc.service.getAllHandler(sc.reqContext)
+			require.Equal(t, 200, resp.Status())
+			var actual libraryElementsSearch
+			err := json.Unmarshal(resp.Body(), &actual)
+			require.NoError(t, err)
+			require.Equal(t, 1, len(actual.Result.Elements))
+			if diff := cmp.Diff(result.Result, actual.Result.Elements[0], getCompareOptions()...); diff != "" {
+				t.Fatalf("Result mismatch (-want +got):\n%s", diff)
+			}
+		})
+}
+
+func TestLibraryElementCreatePermissions(t *testing.T) {
 	var accessCases = []struct {
-		role   models.RoleType
-		items  []folderACLItem
-		desc   string
-		status int
+		permissions map[string][]string
+		desc        string
+		status      int
 	}{
-		{models.ROLE_ADMIN, defaultPermissions, defaultDesc, 200},
-		{models.ROLE_ADMIN, adminOnlyPermissions, adminOnlyDesc, 200},
-		{models.ROLE_ADMIN, editorOnlyPermissions, editorOnlyDesc, 200},
-		{models.ROLE_ADMIN, editorAndViewerPermissions, editorAndViewerDesc, 200},
-		{models.ROLE_ADMIN, viewerOnlyPermissions, viewerOnlyDesc, 200},
-		{models.ROLE_ADMIN, everyonePermissions, everyoneDesc, 200},
-		{models.ROLE_ADMIN, noPermissions, noDesc, 200},
-		{models.ROLE_EDITOR, defaultPermissions, defaultDesc, 200},
-		{models.ROLE_EDITOR, adminOnlyPermissions, adminOnlyDesc, 403},
-		{models.ROLE_EDITOR, editorOnlyPermissions, editorOnlyDesc, 200},
-		{models.ROLE_EDITOR, editorAndViewerPermissions, editorAndViewerDesc, 200},
-		{models.ROLE_EDITOR, viewerOnlyPermissions, viewerOnlyDesc, 403},
-		{models.ROLE_EDITOR, everyonePermissions, everyoneDesc, 200},
-		{models.ROLE_EDITOR, noPermissions, noDesc, 403},
-		{models.ROLE_VIEWER, defaultPermissions, defaultDesc, 403},
-		{models.ROLE_VIEWER, adminOnlyPermissions, adminOnlyDesc, 403},
-		{models.ROLE_VIEWER, editorOnlyPermissions, editorOnlyDesc, 403},
-		{models.ROLE_VIEWER, editorAndViewerPermissions, editorAndViewerDesc, 200},
-		{models.ROLE_VIEWER, viewerOnlyPermissions, viewerOnlyDesc, 200},
-		{models.ROLE_VIEWER, everyonePermissions, everyoneDesc, 200},
-		{models.ROLE_VIEWER, noPermissions, noDesc, 403},
+		{
+			desc: "can create library elements when granted write access to the correct folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_Folder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can create library elements when granted write access to all folders",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can't create library elements when granted write access to the wrong folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_Other_folder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusForbidden,
+		},
+		{
+			desc: "can't create library elements when granted read access to the right folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersRead: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_Folder")},
+			},
+			status: http.StatusForbidden,
+		},
 	}
 
 	for _, testCase := range accessCases {
-		testScenario(t, fmt.Sprintf("When %s tries to create a library panel in a folder with %s, it should return correct status", testCase.role, testCase.desc),
+		testScenario(t, testCase.desc,
 			func(t *testing.T, sc scenarioContext) {
-				folder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, testCase.items)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
+				folder := createFolder(t, sc, "Folder", nil)
+				sc.reqContext.Permissions = map[int64]map[string][]string{
+					1: testCase.permissions,
+				}
 
-				command := getCreatePanelCommand(folder.Id, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
+				// nolint:staticcheck
+				command := getCreatePanelCommand(folder.ID, folder.UID, "Library Panel Name")
+				sc.reqContext.Req.Body = mockRequestBody(command)
+				resp := sc.service.createHandler(sc.reqContext)
 				require.Equal(t, testCase.status, resp.Status())
 			})
+	}
+}
 
-		testScenario(t, fmt.Sprintf("When %s tries to patch a library panel by moving it to a folder with %s, it should return correct status", testCase.role, testCase.desc),
+func TestLibraryElementPatchPermissions(t *testing.T) {
+	var accessCases = []struct {
+		permissions map[string][]string
+		desc        string
+		status      int
+	}{
+		{
+			desc: "can move library elements when granted write access to the source and destination folders",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_FromFolder"), dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_ToFolder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can move library elements when granted write access to all folders",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can't move library elements when granted write access only to the source folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("FromFolder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusForbidden,
+		},
+		{
+			desc: "can't move library elements when granted write access to the destination folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("ToFolder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusForbidden,
+		},
+	}
+
+	for _, testCase := range accessCases {
+		testScenario(t, testCase.desc,
 			func(t *testing.T, sc scenarioContext) {
-				fromFolder := createFolderWithACL(t, sc.sqlStore, "Everyone", sc.user, everyonePermissions)
-				command := getCreatePanelCommand(fromFolder.Id, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
+				fromFolder := createFolder(t, sc, "FromFolder", nil)
+				// nolint:staticcheck
+				command := getCreatePanelCommand(fromFolder.ID, fromFolder.UID, "Library Panel Name")
+				sc.reqContext.Req.Body = mockRequestBody(command)
+				resp := sc.service.createHandler(sc.reqContext)
 				result := validateAndUnMarshalResponse(t, resp)
-				toFolder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, testCase.items)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
 
-				cmd := patchLibraryElementCommand{FolderID: toFolder.Id, Version: 1, Kind: int64(models.PanelElement)}
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.patchHandler(sc.reqContext, cmd)
+				toFolder := createFolder(t, sc, "ToFolder", nil)
+
+				sc.reqContext.Permissions = map[int64]map[string][]string{
+					1: testCase.permissions,
+				}
+
+				// nolint:staticcheck
+				cmd := model.PatchLibraryElementCommand{FolderID: toFolder.ID, FolderUID: &toFolder.UID, Version: 1, Kind: int64(model.PanelElement)}
+				sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+				sc.reqContext.Req.Body = mockRequestBody(cmd)
+				resp = sc.service.patchHandler(sc.reqContext)
 				require.Equal(t, testCase.status, resp.Status())
 			})
+	}
+}
 
-		testScenario(t, fmt.Sprintf("When %s tries to patch a library panel by moving it from a folder with %s, it should return correct status", testCase.role, testCase.desc),
+func TestLibraryElementDeletePermissions(t *testing.T) {
+	var accessCases = []struct {
+		permissions map[string][]string
+		desc        string
+		status      int
+	}{
+		{
+			desc: "can delete library elements when granted write access to the correct folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_Folder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceScopeUID("uid_for_Folder")},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can delete library elements when granted write access to all folders",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can't delete library elements when granted write access to the wrong folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersWrite: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("Other_folder")},
+				dashboards.ActionFoldersRead:  {dashboards.ScopeFoldersProvider.GetResourceScopeUID("Other_folder")},
+			},
+			status: http.StatusForbidden,
+		},
+		{
+			desc: "can't delete library elements when granted read access to the right folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersRead: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("Folder")},
+			},
+			status: http.StatusForbidden,
+		},
+	}
+
+	for _, testCase := range accessCases {
+		testScenario(t, testCase.desc,
 			func(t *testing.T, sc scenarioContext) {
-				fromFolder := createFolderWithACL(t, sc.sqlStore, "Everyone", sc.user, testCase.items)
-				command := getCreatePanelCommand(fromFolder.Id, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
+				folder := createFolder(t, sc, "Folder", sc.service.folderService)
+				// nolint:staticcheck
+				command := getCreatePanelCommand(folder.ID, folder.UID, "Library Panel Name")
+				sc.reqContext.Req.Body = mockRequestBody(command)
+				resp := sc.service.createHandler(sc.reqContext)
 				result := validateAndUnMarshalResponse(t, resp)
-				toFolder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, everyonePermissions)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
 
-				cmd := patchLibraryElementCommand{FolderID: toFolder.Id, Version: 1, Kind: int64(models.PanelElement)}
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.patchHandler(sc.reqContext, cmd)
-				require.Equal(t, testCase.status, resp.Status())
-			})
+				sc.reqContext.Permissions = map[int64]map[string][]string{
+					1: testCase.permissions,
+				}
 
-		testScenario(t, fmt.Sprintf("When %s tries to delete a library panel in a folder with %s, it should return correct status", testCase.role, testCase.desc),
-			func(t *testing.T, sc scenarioContext) {
-				folder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, testCase.items)
-				cmd := getCreatePanelCommand(folder.Id, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, cmd)
-				result := validateAndUnMarshalResponse(t, resp)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+				sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
 				resp = sc.service.deleteHandler(sc.reqContext)
 				require.Equal(t, testCase.status, resp.Status())
 			})
 	}
+}
 
-	var generalFolderCases = []struct {
-		role   models.RoleType
-		status int
-	}{
-		{models.ROLE_ADMIN, 200},
-		{models.ROLE_EDITOR, 200},
-		{models.ROLE_VIEWER, 403},
-	}
+func TestLibraryElementsWithMissingFolders(t *testing.T) {
+	testScenario(t, "When a user tries to create a library panel in a folder that doesn't exist, it should fail",
+		func(t *testing.T, sc scenarioContext) {
+			command := getCreatePanelCommand(0, "badFolderUID", "Library Panel Name")
+			sc.reqContext.Req.Body = mockRequestBody(command)
+			resp := sc.service.createHandler(sc.reqContext)
+			fmt.Println(string(resp.Body()))
+			require.Equal(t, 400, resp.Status())
+		})
 
-	for _, testCase := range generalFolderCases {
-		testScenario(t, fmt.Sprintf("When %s tries to create a library panel in the General folder, it should return correct status", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
+	testScenario(t, "When a user tries to patch a library panel by moving it to a folder that doesn't exist, it should fail",
+		func(t *testing.T, sc scenarioContext) {
+			folder := createFolder(t, sc, "Folder", nil)
+			// nolint:staticcheck
+			command := getCreatePanelCommand(folder.ID, folder.UID, "Library Panel Name")
+			sc.reqContext.Req.Body = mockRequestBody(command)
+			resp := sc.service.createHandler(sc.reqContext)
+			result := validateAndUnMarshalResponse(t, resp)
 
-				command := getCreatePanelCommand(0, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
-				require.Equal(t, testCase.status, resp.Status())
-			})
+			folderUID := "badFolderUID"
+			// nolint:staticcheck
+			cmd := model.PatchLibraryElementCommand{FolderID: -100, FolderUID: &folderUID, Version: 1, Kind: int64(model.PanelElement)}
+			sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+			sc.reqContext.Req.Body = mockRequestBody(cmd)
+			resp = sc.service.patchHandler(sc.reqContext)
+			require.Equal(t, 400, resp.Status())
+		})
+}
 
-		testScenario(t, fmt.Sprintf("When %s tries to patch a library panel by moving it to the General folder, it should return correct status", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				folder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, everyonePermissions)
-				command := getCreatePanelCommand(folder.Id, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
-				result := validateAndUnMarshalResponse(t, resp)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				cmd := patchLibraryElementCommand{FolderID: 0, Version: 1, Kind: int64(models.PanelElement)}
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.patchHandler(sc.reqContext, cmd)
-				require.Equal(t, testCase.status, resp.Status())
-			})
-
-		testScenario(t, fmt.Sprintf("When %s tries to patch a library panel by moving it from the General folder, it should return correct status", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				folder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, everyonePermissions)
-				command := getCreatePanelCommand(0, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
-				result := validateAndUnMarshalResponse(t, resp)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				cmd := patchLibraryElementCommand{FolderID: folder.Id, Version: 1, Kind: int64(models.PanelElement)}
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.patchHandler(sc.reqContext, cmd)
-				require.Equal(t, testCase.status, resp.Status())
-			})
-
-		testScenario(t, fmt.Sprintf("When %s tries to delete a library panel in the General folder, it should return correct status", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				cmd := getCreatePanelCommand(0, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, cmd)
-				result := validateAndUnMarshalResponse(t, resp)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.deleteHandler(sc.reqContext)
-				require.Equal(t, testCase.status, resp.Status())
-			})
-	}
-
-	var missingFolderCases = []struct {
-		role models.RoleType
-	}{
-		{models.ROLE_ADMIN},
-		{models.ROLE_EDITOR},
-		{models.ROLE_VIEWER},
-	}
-
-	for _, testCase := range missingFolderCases {
-		testScenario(t, fmt.Sprintf("When %s tries to create a library panel in a folder that doesn't exist, it should fail", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				command := getCreatePanelCommand(-100, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
-				require.Equal(t, 404, resp.Status())
-			})
-
-		testScenario(t, fmt.Sprintf("When %s tries to patch a library panel by moving it to a folder that doesn't exist, it should fail", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				folder := createFolderWithACL(t, sc.sqlStore, "Folder", sc.user, everyonePermissions)
-				command := getCreatePanelCommand(folder.Id, "Library Panel Name")
-				resp := sc.service.createHandler(sc.reqContext, command)
-				result := validateAndUnMarshalResponse(t, resp)
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				cmd := patchLibraryElementCommand{FolderID: -100, Version: 1, Kind: int64(models.PanelElement)}
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.patchHandler(sc.reqContext, cmd)
-				require.Equal(t, 404, resp.Status())
-			})
-	}
-
+func TestLibraryElementsGetPermissions(t *testing.T) {
 	var getCases = []struct {
-		role     models.RoleType
-		statuses []int
+		permissions map[string][]string
+		desc        string
+		status      int
 	}{
-		{models.ROLE_ADMIN, []int{200, 200, 200, 200, 200, 200, 200}},
-		{models.ROLE_EDITOR, []int{200, 404, 200, 200, 200, 200, 200}},
-		{models.ROLE_VIEWER, []int{200, 404, 404, 200, 200, 200, 200}},
+		{
+			desc: "can get a library element when granted read access to all folders",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersRead: {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			status: http.StatusOK,
+		},
+		{
+			desc: "can't list library element when granted read access to the wrong folder",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersRead: {dashboards.ScopeFoldersProvider.GetResourceScopeUID("Other_folder")},
+			},
+			status: http.StatusForbidden,
+		},
 	}
-
 	for _, testCase := range getCases {
-		testScenario(t, fmt.Sprintf("When %s tries to get a library panel, it should return correct response", testCase.role),
+		testScenario(t, testCase.desc,
 			func(t *testing.T, sc scenarioContext) {
-				var results []libraryElement
-				for i, folderCase := range folderCases {
-					folder := createFolderWithACL(t, sc.sqlStore, fmt.Sprintf("Folder%v", i), sc.user, folderCase)
-					cmd := getCreatePanelCommand(folder.Id, fmt.Sprintf("Library Panel in Folder%v", i))
-					resp := sc.service.createHandler(sc.reqContext, cmd)
-					result := validateAndUnMarshalResponse(t, resp)
-					result.Result.Meta.CreatedBy.Name = userInDbName
-					result.Result.Meta.CreatedBy.AvatarURL = userInDbAvatar
-					result.Result.Meta.UpdatedBy.Name = userInDbName
-					result.Result.Meta.UpdatedBy.AvatarURL = userInDbAvatar
-					result.Result.Meta.FolderName = folder.Title
-					result.Result.Meta.FolderUID = folder.Uid
-					results = append(results, result.Result)
-				}
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				for i, result := range results {
-					sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.UID})
-					resp := sc.service.getHandler(sc.reqContext)
-					require.Equal(t, testCase.statuses[i], resp.Status())
-				}
-			})
-
-		testScenario(t, fmt.Sprintf("When %s tries to get a library panel from General folder, it should return correct response", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				cmd := getCreatePanelCommand(0, "Library Panel in General Folder")
-				resp := sc.service.createHandler(sc.reqContext, cmd)
+				folder := createFolder(t, sc, "Folder", nil)
+				// nolint:staticcheck
+				cmd := getCreatePanelCommand(folder.ID, folder.UID, "Library Panel")
+				sc.reqContext.Req.Body = mockRequestBody(cmd)
+				resp := sc.service.createHandler(sc.reqContext)
 				result := validateAndUnMarshalResponse(t, resp)
 				result.Result.Meta.CreatedBy.Name = userInDbName
-				result.Result.Meta.CreatedBy.AvatarURL = userInDbAvatar
+				result.Result.Meta.CreatedBy.AvatarUrl = userInDbAvatar
 				result.Result.Meta.UpdatedBy.Name = userInDbName
-				result.Result.Meta.UpdatedBy.AvatarURL = userInDbAvatar
-				result.Result.Meta.FolderName = "General"
-				result.Result.Meta.FolderUID = ""
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
+				result.Result.Meta.UpdatedBy.AvatarUrl = userInDbAvatar
+				result.Result.Meta.FolderName = folder.Title
+				result.Result.Meta.FolderUID = folder.UID
 
-				sc.ctx.Req = macaron.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
-				resp = sc.service.getHandler(sc.reqContext)
-				require.Equal(t, 200, resp.Status())
-				var actual libraryElementResult
-				err := json.Unmarshal(resp.Body(), &actual)
-				require.NoError(t, err)
-				if diff := cmp.Diff(result.Result, actual.Result, getCompareOptions()...); diff != "" {
-					t.Fatalf("Result mismatch (-want +got):\n%s", diff)
+				sc.reqContext.OrgRole = org.RoleViewer
+				sc.reqContext.Permissions = map[int64]map[string][]string{
+					1: testCase.permissions,
 				}
+
+				sc.ctx.Req = web.SetURLParams(sc.ctx.Req, map[string]string{":uid": result.Result.UID})
+				resp = sc.service.getHandler(sc.reqContext)
+				require.Equal(t, testCase.status, resp.Status())
 			})
 	}
+}
 
-	var getAllCases = []struct {
-		role          models.RoleType
-		panels        int
-		folderIndexes []int
+func TestLibraryElementsGetAllPermissions(t *testing.T) {
+	var getCases = []struct {
+		permissions         map[string][]string
+		desc                string
+		status              int
+		expectedResultCount int
 	}{
-		{models.ROLE_ADMIN, 7, []int{0, 1, 2, 3, 4, 5, 6}},
-		{models.ROLE_EDITOR, 6, []int{0, 2, 3, 4, 5, 6}},
-		{models.ROLE_VIEWER, 5, []int{0, 3, 4, 5, 6}},
+		{
+			desc: "can get all library elements when granted read access to all folders",
+			permissions: map[string][]string{
+				dashboards.ActionFoldersRead: {dashboards.ScopeFoldersProvider.GetResourceAllScope()},
+			},
+			expectedResultCount: 2,
+			status:              http.StatusOK,
+		},
+		{
+			desc:                "can't get any library element when doesn't have access to any folders",
+			permissions:         map[string][]string{},
+			expectedResultCount: 0,
+			status:              http.StatusOK,
+		},
 	}
-
-	for _, testCase := range getAllCases {
-		testScenario(t, fmt.Sprintf("When %s tries to get all library panels, it should return correct response", testCase.role),
+	for _, testCase := range getCases {
+		testScenario(t, testCase.desc,
 			func(t *testing.T, sc scenarioContext) {
-				var results []libraryElement
-				for i, folderCase := range folderCases {
-					folder := createFolderWithACL(t, sc.sqlStore, fmt.Sprintf("Folder%v", i), sc.user, folderCase)
-					cmd := getCreatePanelCommand(folder.Id, fmt.Sprintf("Library Panel in Folder%v", i))
-					resp := sc.service.createHandler(sc.reqContext, cmd)
+				for i := 1; i <= 2; i++ {
+					folder := createFolder(t, sc, fmt.Sprintf("Folder%d", i), nil)
+					// nolint:staticcheck
+					cmd := getCreatePanelCommand(folder.ID, folder.UID, fmt.Sprintf("Library Panel %d", i))
+					sc.reqContext.Req.Body = mockRequestBody(cmd)
+					resp := sc.service.createHandler(sc.reqContext)
 					result := validateAndUnMarshalResponse(t, resp)
-					result.Result.Meta.CreatedBy.Name = userInDbName
-					result.Result.Meta.CreatedBy.AvatarURL = userInDbAvatar
-					result.Result.Meta.UpdatedBy.Name = userInDbName
-					result.Result.Meta.UpdatedBy.AvatarURL = userInDbAvatar
-					result.Result.Meta.FolderName = folder.Title
-					result.Result.Meta.FolderUID = folder.Uid
-					results = append(results, result.Result)
+					result.Result.Meta.FolderUID = folder.UID
 				}
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
+
+				sc.reqContext.OrgRole = org.RoleViewer
+				sc.reqContext.Permissions = map[int64]map[string][]string{
+					1: testCase.permissions,
+				}
 
 				resp := sc.service.getAllHandler(sc.reqContext)
 				require.Equal(t, 200, resp.Status())
 				var actual libraryElementsSearch
 				err := json.Unmarshal(resp.Body(), &actual)
 				require.NoError(t, err)
-				require.Equal(t, testCase.panels, len(actual.Result.Elements))
-				for _, folderIndex := range testCase.folderIndexes {
-					var folderID = int64(folderIndex + 2) // testScenario creates one folder and general folder doesn't count
-					var foundExists = false
-					var foundResult libraryElement
-					var actualExists = false
-					var actualResult libraryElement
-					for _, result := range results {
-						if result.FolderID == folderID {
-							foundExists = true
-							foundResult = result
-							break
-						}
-					}
-					require.Equal(t, foundExists, true)
-
-					for _, result := range actual.Result.Elements {
-						if result.FolderID == folderID {
-							actualExists = true
-							actualResult = result
-							break
-						}
-					}
-					require.Equal(t, actualExists, true)
-
-					if diff := cmp.Diff(foundResult, actualResult, getCompareOptions()...); diff != "" {
-						t.Fatalf("Result mismatch (-want +got):\n%s", diff)
-					}
-				}
-			})
-
-		testScenario(t, fmt.Sprintf("When %s tries to get all library panels from General folder, it should return correct response", testCase.role),
-			func(t *testing.T, sc scenarioContext) {
-				cmd := getCreatePanelCommand(0, "Library Panel in General Folder")
-				resp := sc.service.createHandler(sc.reqContext, cmd)
-				result := validateAndUnMarshalResponse(t, resp)
-				result.Result.Meta.CreatedBy.Name = userInDbName
-				result.Result.Meta.CreatedBy.AvatarURL = userInDbAvatar
-				result.Result.Meta.UpdatedBy.Name = userInDbName
-				result.Result.Meta.UpdatedBy.AvatarURL = userInDbAvatar
-				result.Result.Meta.FolderName = "General"
-				sc.reqContext.SignedInUser.OrgRole = testCase.role
-
-				resp = sc.service.getAllHandler(sc.reqContext)
-				require.Equal(t, 200, resp.Status())
-				var actual libraryElementsSearch
-				err := json.Unmarshal(resp.Body(), &actual)
-				require.NoError(t, err)
-				require.Equal(t, 1, len(actual.Result.Elements))
-				if diff := cmp.Diff(result.Result, actual.Result.Elements[0], getCompareOptions()...); diff != "" {
-					t.Fatalf("Result mismatch (-want +got):\n%s", diff)
-				}
+				require.Equal(t, testCase.expectedResultCount, len(actual.Result.Elements))
 			})
 	}
 }

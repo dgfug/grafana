@@ -1,9 +1,13 @@
-import React, { useState, HTMLAttributes, useMemo, useRef, useLayoutEffect } from 'react';
 import { css, cx } from '@emotion/css';
+import { useState, HTMLAttributes, useMemo, useRef, useLayoutEffect } from 'react';
+import * as React from 'react';
+import { useWindowSize } from 'react-use';
+
+import { Dimensions2D, GrafanaTheme2 } from '@grafana/data';
+
 import { useStyles2 } from '../../themes';
 import { getTooltipContainerStyles } from '../../themes/mixins';
-import useWindowSize from 'react-use/lib/useWindowSize';
-import { Dimensions2D, GrafanaTheme2 } from '@grafana/data';
+
 import { calculateTooltipPosition } from './utils';
 
 /**
@@ -13,18 +17,20 @@ export interface VizTooltipContainerProps extends HTMLAttributes<HTMLDivElement>
   position: { x: number; y: number };
   offset: { x: number; y: number };
   children?: React.ReactNode;
+  allowPointerEvents?: boolean;
 }
 
 /**
  * @public
  */
-export const VizTooltipContainer: React.FC<VizTooltipContainerProps> = ({
+export const VizTooltipContainer = ({
   position: { x: positionX, y: positionY },
   offset: { x: offsetX, y: offsetY },
   children,
+  allowPointerEvents = false,
   className,
   ...otherProps
-}) => {
+}: VizTooltipContainerProps) => {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [tooltipMeasurement, setTooltipMeasurement] = useState<Dimensions2D>({ width: 0, height: 0 });
   const { width, height } = useWindowSize();
@@ -43,13 +49,13 @@ export const VizTooltipContainer: React.FC<VizTooltipContainerProps> = ({
           const tH = Math.floor(entry.contentRect.height + 2 * 8);
           if (tooltipMeasurement.width !== tW || tooltipMeasurement.height !== tH) {
             setTooltipMeasurement({
-              width: tW,
-              height: tH,
+              width: Math.min(tW, width),
+              height: Math.min(tH, height),
             });
           }
         }
       }),
-    [tooltipMeasurement]
+    [tooltipMeasurement, width, height]
   );
 
   useLayoutEffect(() => {
@@ -90,11 +96,13 @@ export const VizTooltipContainer: React.FC<VizTooltipContainerProps> = ({
         left: 0,
         // disabling pointer-events is to prevent the tooltip from flickering when moving left to right
         // see e.g. https://github.com/grafana/grafana/pull/33609
-        pointerEvents: 'none',
+        pointerEvents: allowPointerEvents ? 'auto' : 'none',
         top: 0,
         transform: `translate(${placement.x}px, ${placement.y}px)`,
         transition: 'transform ease-out 0.1s',
       }}
+      aria-live="polite"
+      aria-atomic="true"
       {...otherProps}
       className={cx(styles.wrapper, className)}
     >
@@ -106,7 +114,5 @@ export const VizTooltipContainer: React.FC<VizTooltipContainerProps> = ({
 VizTooltipContainer.displayName = 'VizTooltipContainer';
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  wrapper: css`
-    ${getTooltipContainerStyles(theme)}
-  `,
+  wrapper: css(getTooltipContainerStyles(theme)),
 });

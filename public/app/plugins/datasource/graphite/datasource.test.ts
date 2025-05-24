@@ -1,15 +1,26 @@
-import { GraphiteDatasource } from './datasource';
 import { isArray } from 'lodash';
-
-import { TemplateSrv } from 'app/features/templating/template_srv';
-import { dateTime, getFrameDisplayName } from '@grafana/data';
-import { backendSrv } from 'app/core/services/backend_srv'; // will use the version in __mocks__
 import { of } from 'rxjs';
 import { createFetchResponse } from 'test/helpers/createFetchResponse';
+
+import {
+  AbstractLabelMatcher,
+  AbstractLabelOperator,
+  DataQueryRequest,
+  dateTime,
+  getFrameDisplayName,
+  MetricFindValue,
+} from '@grafana/data';
+import { BackendSrvRequest } from '@grafana/runtime';
+import { backendSrv } from 'app/core/services/backend_srv'; // will use the version in __mocks__
+import { TemplateSrv } from 'app/features/templating/template_srv';
+
+import { fromString } from './configuration/parseLokiLabelMappings';
+import { GraphiteDatasource } from './datasource';
+import { GraphiteQuery, GraphiteQueryType } from './types';
 import { DEFAULT_GRAPHITE_VERSION } from './versions';
 
 jest.mock('@grafana/runtime', () => ({
-  ...((jest.requireActual('@grafana/runtime') as unknown) as object),
+  ...jest.requireActual('@grafana/runtime'),
   getBackendSrv: () => backendSrv,
 }));
 
@@ -44,8 +55,12 @@ describe('graphiteDatasource', () => {
 
   describe('convertResponseToDataFrames', () => {
     it('should transform regular result', () => {
-      const result = ctx.ds.convertResponseToDataFrames({
-        data: {
+      const refIDMap = {
+        refIDA: 'A',
+        refIDB: 'B',
+      };
+      const result = ctx.ds.convertResponseToDataFrames(
+        createFetchResponse({
           meta: {
             stats: {
               'executeplan.cache-hit-partial.count': 5,
@@ -54,7 +69,7 @@ describe('graphiteDatasource', () => {
           },
           series: [
             {
-              target: 'seriesA',
+              target: 'seriesA refIDA',
               datapoints: [
                 [100, 200],
                 [101, 201],
@@ -74,7 +89,7 @@ describe('graphiteDatasource', () => {
               ],
             },
             {
-              target: 'seriesB',
+              target: 'seriesB refIDB',
               meta: [
                 {
                   'aggnum-norm': 1,
@@ -94,33 +109,78 @@ describe('graphiteDatasource', () => {
               ],
             },
           ],
-        },
-      });
+        }),
+        refIDMap
+      );
 
       expect(result.data.length).toBe(2);
       expect(getFrameDisplayName(result.data[0])).toBe('seriesA');
       expect(getFrameDisplayName(result.data[1])).toBe('seriesB');
       expect(result.data[0].length).toBe(2);
       expect(result.data[0].meta.notices.length).toBe(1);
+      expect(result.data[0].refId).toBe('A');
       expect(result.data[0].meta.notices[0].text).toBe('Data is rolled up, aggregated over 2h using Average function');
       expect(result.data[1].meta.notices).toBeUndefined();
+      expect(result.data[1].refId).toBe('B');
+    });
+    it('handles series with spaces in the name', () => {
+      const refIDMap = {
+        refIDA: 'A',
+        refIDB: 'B',
+      };
+      const result = ctx.ds.convertResponseToDataFrames(
+        createFetchResponse({
+          meta: {
+            stats: {
+              'executeplan.cache-hit-partial.count': 5,
+              'executeplan.cache-hit.count': 10,
+            },
+          },
+          series: [
+            {
+              target: 'series A with spaces refIDA',
+              datapoints: [
+                [100, 200],
+                [101, 201],
+              ],
+            },
+            {
+              target: 'series B with spaces refIDB',
+              datapoints: [
+                [200, 300],
+                [201, 301],
+              ],
+            },
+          ],
+        }),
+        refIDMap
+      );
+
+      expect(result.data.length).toBe(2);
+      expect(getFrameDisplayName(result.data[0])).toBe('series A with spaces');
+      expect(getFrameDisplayName(result.data[1])).toBe('series B with spaces');
+      expect(result.data[0].length).toBe(2);
+      expect(result.data[0].refId).toBe('A');
+      expect(result.data[1].refId).toBe('B');
     });
   });
 
   describe('When querying graphite with one target using query editor target spec', () => {
-    const query = {
-      panelId: 3,
-      dashboardId: 5,
-      range: { raw: { from: 'now-1h', to: 'now' } },
-      targets: [{ target: 'prod1.count' }, { target: 'prod2.count' }],
-      maxDataPoints: 500,
-    };
-
-    let response: any;
-    let requestOptions: any;
+    let response: unknown;
+    let requestOptions: BackendSrvRequest;
 
     beforeEach(() => {
-      fetchMock.mockImplementation((options: any) => {
+      const query = {
+        panelId: 3,
+        dashboardId: 5,
+        range: { from: dateTime('2022-04-01T00:00:00'), to: dateTime('2022-07-01T00:00:00') },
+        targets: [
+          { target: 'prod1.count', refId: 'A' },
+          { target: 'prod2.count', refId: 'B' },
+        ],
+        maxDataPoints: 500,
+      };
+      fetchMock.mockImplementation((options) => {
         requestOptions = options;
         return of(
           createFetchResponse([
@@ -135,12 +195,12 @@ describe('graphiteDatasource', () => {
         );
       });
 
-      response = ctx.ds.query(query as any);
+      response = ctx.ds.query(query as unknown as DataQueryRequest<GraphiteQuery>);
     });
 
     it('X-Dashboard and X-Panel headers to be set!', () => {
-      expect(requestOptions.headers['X-Dashboard-Id']).toBe(5);
-      expect(requestOptions.headers['X-Panel-Id']).toBe(3);
+      expect(requestOptions.headers?.['X-Dashboard-Id']).toBe(5);
+      expect(requestOptions.headers?.['X-Panel-Id']).toBe(3);
     });
 
     it('should generate the correct query', () => {
@@ -153,10 +213,10 @@ describe('graphiteDatasource', () => {
 
     it('should query correctly', () => {
       const params = requestOptions.data.split('&');
-      expect(params).toContain('target=prod1.count');
-      expect(params).toContain('target=prod2.count');
-      expect(params).toContain('from=-1h');
-      expect(params).toContain('until=now');
+      expect(params).toContain(`target=${encodeURIComponent(`aliasSub(prod1.count, "(^.*$)", "\\1 A")`)}`);
+      expect(params).toContain(`target=${encodeURIComponent(`aliasSub(prod2.count, "(^.*$)", "\\1 B")`)}`);
+      expect(params).toContain('from=1648789200');
+      expect(params).toContain('until=1656655200');
     });
 
     it('should exclude undefined params', () => {
@@ -175,22 +235,39 @@ describe('graphiteDatasource', () => {
     it('should convert to millisecond resolution', async () => {
       await expect(response).toEmitValuesWith((values: any) => {
         const results = values[0];
-        expect(results.data[0].fields[1].values.get(0)).toBe(10);
+        expect(results.data[0].fields[1].values[0]).toBe(10);
       });
     });
   });
 
   describe('when fetching Graphite Events as annotations', () => {
     let results: any;
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      errorSpy = jest.spyOn(console, 'error').mockImplementation();
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
 
     const options = {
-      annotation: {
-        tags: 'tag1',
-      },
+      targets: [
+        {
+          fromAnnotations: true,
+          tags: ['tag1'],
+          queryType: 'tags',
+        } as GraphiteQuery,
+      ],
+
       range: {
-        from: dateTime(1432288354),
-        to: dateTime(1432288401),
-        raw: { from: 'now-24h', to: 'now' },
+        from: dateTime('2022-06-06T07:03:03.109Z'),
+        to: dateTime('2022-06-07T07:03:03.109Z'),
+        raw: {
+          from: '2022-06-06T07:03:03.109Z',
+          to: '2022-06-07T07:03:03.109Z',
+        },
       },
     };
 
@@ -206,10 +283,10 @@ describe('graphiteDatasource', () => {
       ];
 
       beforeEach(async () => {
-        fetchMock.mockImplementation((options: any) => {
+        fetchMock.mockImplementation((options) => {
           return of(createFetchResponse(response));
         });
-        await ctx.ds.annotationQuery(options).then((data: any) => {
+        await ctx.ds.annotationEvents(options.range, options.targets[0]).then((data) => {
           results = data;
         });
       });
@@ -234,11 +311,11 @@ describe('graphiteDatasource', () => {
       ];
 
       beforeEach(async () => {
-        fetchMock.mockImplementation((options: any) => {
+        fetchMock.mockImplementation((options) => {
           return of(createFetchResponse(response));
         });
 
-        await ctx.ds.annotationQuery(options).then((data: any) => {
+        await ctx.ds.annotationEvents(options.range, options.targets[0]).then((data) => {
           results = data;
         });
       });
@@ -252,13 +329,14 @@ describe('graphiteDatasource', () => {
     });
 
     it('and tags response is invalid', async () => {
-      fetchMock.mockImplementation((options: any) => {
+      fetchMock.mockImplementation((options) => {
         return of(createFetchResponse('zzzzzzz'));
       });
-      await ctx.ds.annotationQuery(options).then((data: any) => {
+      await ctx.ds.annotationEvents(options.range, options.targets[0]).then((data) => {
         results = data;
       });
       expect(results).toEqual([]);
+      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/Unable to get annotations/));
     });
   });
 
@@ -295,62 +373,132 @@ describe('graphiteDatasource', () => {
 
   describe('building graphite params', () => {
     it('should return empty array if no targets', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{}],
-      });
+      const originalTargetMap = { A: '' };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{}],
+        },
+        originalTargetMap
+      );
       expect(results.length).toBe(0);
     });
 
     it('should uri escape targets', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{ target: 'prod1.{test,test2}' }, { target: 'prod2.count' }],
-      });
+      const originalTargetMap = {
+        A: 'prod1.{test,test2}',
+        B: 'prod2.count',
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: 'prod1.{test,test2}' }, { target: 'prod2.count' }],
+        },
+        originalTargetMap
+      );
       expect(results).toContain('target=prod1.%7Btest%2Ctest2%7D');
     });
 
     it('should replace target placeholder', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{ target: 'series1' }, { target: 'series2' }, { target: 'asPercent(#A,#B)' }],
-      });
+      const originalTargetMap = {
+        A: 'series1',
+        B: 'series2',
+        C: 'asPercent(#A,#B)',
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: 'series1' }, { target: 'series2' }, { target: 'asPercent(#A,#B)' }],
+        },
+        originalTargetMap
+      );
       expect(results[2]).toBe('target=asPercent(series1%2Cseries2)');
     });
 
     it('should replace target placeholder for hidden series', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [
-          { target: 'series1', hide: true },
-          { target: 'sumSeries(#A)', hide: true },
-          { target: 'asPercent(#A,#B)' },
-        ],
-      });
+      const originalTargetMap = {
+        A: 'series1',
+        B: 'sumSeries(#A)',
+        C: 'asPercent(#A,#B)',
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [
+            { target: 'series1', hide: true },
+            { target: 'sumSeries(#A)', hide: true },
+            { target: 'asPercent(#A,#B)' },
+          ],
+        },
+        originalTargetMap
+      );
       expect(results[0]).toBe('target=' + encodeURIComponent('asPercent(series1,sumSeries(series1))'));
     });
 
     it('should replace target placeholder when nesting query references', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{ target: 'series1' }, { target: 'sumSeries(#A)' }, { target: 'asPercent(#A,#B)' }],
-      });
+      const originalTargetMap = {
+        A: 'series1',
+        B: 'sumSeries(#A)',
+        C: 'asPercent(#A,#B)',
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: 'series1' }, { target: 'sumSeries(#A)' }, { target: 'asPercent(#A,#B)' }],
+        },
+        originalTargetMap
+      );
       expect(results[2]).toBe('target=' + encodeURIComponent('asPercent(series1,sumSeries(series1))'));
     });
 
+    it('should replace target placeholder when nesting query references with template variables', () => {
+      ctx.templateSrv.init([{ type: 'query', name: 'metric', current: { value: ['aMetricName'] } }]);
+      const originalTargetMap = {
+        A: '[[metric]]',
+        B: 'sumSeries(#A)',
+        C: 'asPercent(#A,#B)',
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: '[[metric]]' }, { target: 'sumSeries(#A)' }, { target: 'asPercent(#A,#B)' }],
+        },
+        originalTargetMap
+      );
+      expect(results[2]).toBe('target=' + encodeURIComponent('asPercent(aMetricName,sumSeries(aMetricName))'));
+    });
+
     it('should fix wrong minute interval parameters', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{ target: "summarize(prod.25m.count, '25m', 'sum')" }],
-      });
+      const originalTargetMap = {
+        A: "summarize(prod.25m.count, '25m', 'sum')",
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: "summarize(prod.25m.count, '25m', 'sum')" }],
+        },
+        originalTargetMap
+      );
       expect(results[0]).toBe('target=' + encodeURIComponent("summarize(prod.25m.count, '25min', 'sum')"));
     });
 
     it('should fix wrong month interval parameters', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{ target: "summarize(prod.5M.count, '5M', 'sum')" }],
-      });
+      const originalTargetMap = {
+        A: "summarize(prod.5M.count, '5M', 'sum')",
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: "summarize(prod.5M.count, '5M', 'sum')" }],
+        },
+        originalTargetMap
+      );
       expect(results[0]).toBe('target=' + encodeURIComponent("summarize(prod.5M.count, '5mon', 'sum')"));
     });
 
     it('should ignore empty targets', () => {
-      const results = ctx.ds.buildGraphiteParams({
-        targets: [{ target: 'series1' }, { target: '' }],
-      });
+      const originalTargetMap = {
+        A: 'series1',
+        B: '',
+      };
+      const results = ctx.ds.buildGraphiteParams(
+        {
+          targets: [{ target: 'series1' }, { target: '' }],
+        },
+        originalTargetMap
+      );
       expect(results.length).toBe(2);
     });
 
@@ -364,9 +512,15 @@ describe('graphiteDatasource', () => {
           },
         ]);
 
-        const results = ctx.ds.buildGraphiteParams({
-          targets: [{ target: 'my.$metric.*' }],
-        });
+        const originalTargetMap = {
+          A: 'my.$metric.*',
+        };
+        const results = ctx.ds.buildGraphiteParams(
+          {
+            targets: [{ target: 'my.$metric.*' }],
+          },
+          originalTargetMap
+        );
         expect(results).toStrictEqual(['target=my.b.*', 'format=json']);
       });
 
@@ -378,10 +532,13 @@ describe('graphiteDatasource', () => {
             current: { value: ['a', 'b'] },
           },
         ]);
-
-        const results = ctx.ds.buildGraphiteParams({
-          targets: [{ target: 'my.[[metric]].*' }],
-        });
+        const originalTargetMap = { A: 'my.[[metric]].*' };
+        const results = ctx.ds.buildGraphiteParams(
+          {
+            targets: [{ target: 'my.[[metric]].*' }],
+          },
+          originalTargetMap
+        );
 
         expect(results).toStrictEqual(['target=my.%7Ba%2Cb%7D.*', 'format=json']);
       });
@@ -389,87 +546,87 @@ describe('graphiteDatasource', () => {
   });
 
   describe('querying for template variables', () => {
-    let results: any;
-    let requestOptions: any;
+    let results: MetricFindValue[];
+    let requestOptions: BackendSrvRequest;
 
     beforeEach(() => {
-      fetchMock.mockImplementation((options: any) => {
+      fetchMock.mockImplementation((options) => {
         requestOptions = options;
         return of(createFetchResponse(['backend_01', 'backend_02']));
       });
     });
 
     it('should generate tags query', () => {
-      ctx.ds.metricFindQuery('tags()').then((data: any) => {
+      ctx.ds.metricFindQuery('tags()').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/tags');
-      expect(requestOptions.params.expr).toEqual([]);
+      expect(requestOptions.params?.expr).toEqual([]);
       expect(results).not.toBe(null);
     });
 
     it('should generate tags query with a filter expression', () => {
-      ctx.ds.metricFindQuery('tags(server=backend_01)').then((data: any) => {
+      ctx.ds.metricFindQuery('tags(server=backend_01)').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/tags');
-      expect(requestOptions.params.expr).toEqual(['server=backend_01']);
+      expect(requestOptions.params?.expr).toEqual(['server=backend_01']);
       expect(results).not.toBe(null);
     });
 
     it('should generate tags query for an expression with whitespace after', () => {
-      ctx.ds.metricFindQuery('tags(server=backend_01 )').then((data: any) => {
+      ctx.ds.metricFindQuery('tags(server=backend_01 )').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/tags');
-      expect(requestOptions.params.expr).toEqual(['server=backend_01']);
+      expect(requestOptions.params?.expr).toEqual(['server=backend_01']);
       expect(results).not.toBe(null);
     });
 
     it('should generate tag values query for one tag', () => {
-      ctx.ds.metricFindQuery('tag_values(server)').then((data: any) => {
+      ctx.ds.metricFindQuery('tag_values(server)').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/values');
-      expect(requestOptions.params.tag).toBe('server');
-      expect(requestOptions.params.expr).toEqual([]);
+      expect(requestOptions.params?.tag).toBe('server');
+      expect(requestOptions.params?.expr).toEqual([]);
       expect(results).not.toBe(null);
     });
 
     it('should generate tag values query for a tag and expression', () => {
-      ctx.ds.metricFindQuery('tag_values(server,server=~backend*)').then((data: any) => {
+      ctx.ds.metricFindQuery('tag_values(server,server=~backend*)').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/values');
-      expect(requestOptions.params.tag).toBe('server');
-      expect(requestOptions.params.expr).toEqual(['server=~backend*']);
+      expect(requestOptions.params?.tag).toBe('server');
+      expect(requestOptions.params?.expr).toEqual(['server=~backend*']);
       expect(results).not.toBe(null);
     });
 
     it('should generate tag values query for a tag with whitespace after', () => {
-      ctx.ds.metricFindQuery('tag_values(server )').then((data: any) => {
+      ctx.ds.metricFindQuery('tag_values(server )').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/values');
-      expect(requestOptions.params.tag).toBe('server');
-      expect(requestOptions.params.expr).toEqual([]);
+      expect(requestOptions.params?.tag).toBe('server');
+      expect(requestOptions.params?.expr).toEqual([]);
       expect(results).not.toBe(null);
     });
 
     it('should generate tag values query for a tag and expression with whitespace after', () => {
-      ctx.ds.metricFindQuery('tag_values(server , server=~backend* )').then((data: any) => {
+      ctx.ds.metricFindQuery('tag_values(server , server=~backend* )').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/tags/autoComplete/values');
-      expect(requestOptions.params.tag).toBe('server');
-      expect(requestOptions.params.expr).toEqual(['server=~backend*']);
+      expect(requestOptions.params?.tag).toBe('server');
+      expect(requestOptions.params?.expr).toEqual(['server=~backend*']);
       expect(results).not.toBe(null);
     });
 
@@ -481,7 +638,7 @@ describe('graphiteDatasource', () => {
           current: { value: ['bar'] },
         },
       ]);
-      ctx.ds.metricFindQuery('[[foo]]').then((data: any) => {
+      ctx.ds.metricFindQuery('[[foo]]').then((data) => {
         results = data;
       });
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/metrics/find');
@@ -492,7 +649,7 @@ describe('graphiteDatasource', () => {
     });
 
     it('should interpolate $__searchFilter with searchFilter', () => {
-      ctx.ds.metricFindQuery('app.$__searchFilter', { searchFilter: 'backend' }).then((data: any) => {
+      ctx.ds.metricFindQuery('app.$__searchFilter', { searchFilter: 'backend' }).then((data) => {
         results = data;
       });
 
@@ -503,7 +660,7 @@ describe('graphiteDatasource', () => {
     });
 
     it('should interpolate $__searchFilter with default when searchFilter is missing', () => {
-      ctx.ds.metricFindQuery('app.$__searchFilter', {}).then((data: any) => {
+      ctx.ds.metricFindQuery('app.$__searchFilter', {}).then((data) => {
         results = data;
       });
 
@@ -514,27 +671,215 @@ describe('graphiteDatasource', () => {
     });
 
     it('should request expanded metrics', () => {
-      ctx.ds.metricFindQuery('expand(*.servers.*)').then((data: any) => {
+      ctx.ds.metricFindQuery('expand(*.servers.*)').then((data) => {
         results = data;
       });
 
       expect(requestOptions.url).toBe('/api/datasources/proxy/1/metrics/expand');
-      expect(requestOptions.params.query).toBe('*.servers.*');
+      expect(requestOptions.params?.query).toBe('*.servers.*');
       expect(results).not.toBe(null);
+    });
+
+    it('should fetch from /metrics/find endpoint when queryType is default or query is string', async () => {
+      const stringQuery = 'query';
+      ctx.ds.metricFindQuery(stringQuery).then((data) => {
+        results = data;
+      });
+      expect(requestOptions.url).toBe('/api/datasources/proxy/1/metrics/find');
+      expect(results).not.toBe(null);
+
+      const objectQuery = {
+        queryType: GraphiteQueryType.Default,
+        target: 'query',
+        refId: 'A',
+        datasource: ctx.ds,
+      };
+      const data = await ctx.ds.metricFindQuery(objectQuery);
+      expect(requestOptions.url).toBe('/api/datasources/proxy/1/metrics/find');
+      expect(data).toBeTruthy();
+    });
+
+    it('should fetch from /render endpoint when queryType is value', async () => {
+      fetchMock.mockImplementation((options) => {
+        requestOptions = options;
+        return of(
+          createFetchResponse([
+            {
+              target: 'query',
+              datapoints: [
+                [10, 1],
+                [12, 1],
+              ],
+            },
+          ])
+        );
+      });
+
+      const fq: GraphiteQuery = {
+        queryType: GraphiteQueryType.Value,
+        target: 'query',
+        refId: 'A',
+        datasource: ctx.ds,
+      };
+      const data = await ctx.ds.metricFindQuery(fq);
+      expect(requestOptions.url).toBe('/api/datasources/proxy/1/render');
+      expect(data).toBeTruthy();
+    });
+
+    it('should return values of a query when queryType is GraphiteQueryType.Value', async () => {
+      fetchMock.mockImplementation((options) => {
+        requestOptions = options;
+        return of(
+          createFetchResponse([
+            {
+              target: 'query',
+              datapoints: [
+                [10, 1],
+                [12, 1],
+              ],
+            },
+          ])
+        );
+      });
+
+      const fq: GraphiteQuery = {
+        queryType: GraphiteQueryType.Value,
+        target: 'query',
+        refId: 'A',
+        datasource: ctx.ds,
+      };
+      const data = await ctx.ds.metricFindQuery(fq);
+      expect(requestOptions.url).toBe('/api/datasources/proxy/1/render');
+      expect(data[0].value).toBe(10);
+      expect(data[0].text).toBe('10');
+      expect(data[1].value).toBe(12);
+      expect(data[1].text).toBe('12');
+    });
+
+    it('should return metric names when queryType is GraphiteQueryType.MetricName', async () => {
+      fetchMock.mockImplementation((options) => {
+        requestOptions = options;
+        return of(
+          createFetchResponse([
+            {
+              target: 'apps.backend.backend_01',
+              datapoints: [
+                [10, 1],
+                [12, 1],
+              ],
+            },
+            {
+              target: 'apps.backend.backend_02',
+              datapoints: [
+                [10, 1],
+                [12, 1],
+              ],
+            },
+          ])
+        );
+      });
+
+      const fq: GraphiteQuery = {
+        queryType: GraphiteQueryType.MetricName,
+        target: 'apps.backend.*',
+        refId: 'A',
+        datasource: ctx.ds,
+      };
+      const data = await ctx.ds.metricFindQuery(fq);
+      expect(requestOptions.url).toBe('/api/datasources/proxy/1/render');
+      expect(data[0].text).toBe('apps.backend.backend_01');
+      expect(data[1].text).toBe('apps.backend.backend_02');
+    });
+  });
+
+  describe('exporting to abstract query', () => {
+    async function assertQueryExport(target: string, labelMatchers: AbstractLabelMatcher[]): Promise<void> {
+      let abstractQueries = await ctx.ds.exportToAbstractQueries([
+        {
+          refId: 'A',
+          target,
+        },
+      ]);
+      expect(abstractQueries).toMatchObject([
+        {
+          refId: 'A',
+          labelMatchers: labelMatchers,
+        },
+      ]);
+    }
+
+    beforeEach(() => {
+      ctx.ds.getImportQueryConfiguration = jest.fn().mockReturnValue({
+        loki: {
+          mappings: ['servers.(cluster).(server).*'].map(fromString),
+        },
+      });
+
+      ctx.ds.createFuncInstance = jest.fn().mockImplementation((name: string) => ({
+        name,
+        params: [],
+        def: {
+          name,
+          params: [{ multiple: true }],
+        },
+        updateText: () => {},
+        render: () => {
+          return '';
+        },
+      }));
+    });
+
+    it('extracts metric name based on configuration', async () => {
+      await assertQueryExport('interpolate(alias(servers.west.001.cpu,1,2))', [
+        { name: 'cluster', operator: AbstractLabelOperator.Equal, value: 'west' },
+        { name: 'server', operator: AbstractLabelOperator.Equal, value: '001' },
+      ]);
+
+      await assertQueryExport('interpolate(alias(servers.east.001.request.POST.200,1,2))', [
+        { name: 'cluster', operator: AbstractLabelOperator.Equal, value: 'east' },
+        { name: 'server', operator: AbstractLabelOperator.Equal, value: '001' },
+      ]);
+
+      await assertQueryExport('interpolate(alias(servers.*.002.*,1,2))', [
+        { name: 'server', operator: AbstractLabelOperator.Equal, value: '002' },
+      ]);
+    });
+
+    it('extracts tags', async () => {
+      await assertQueryExport("interpolate(seriesByTag('cluster=west', 'server=002'), inf))", [
+        { name: 'cluster', operator: AbstractLabelOperator.Equal, value: 'west' },
+        { name: 'server', operator: AbstractLabelOperator.Equal, value: '002' },
+      ]);
+      await assertQueryExport("interpolate(seriesByTag('foo=bar', 'server=002'), inf))", [
+        { name: 'foo', operator: AbstractLabelOperator.Equal, value: 'bar' },
+        { name: 'server', operator: AbstractLabelOperator.Equal, value: '002' },
+      ]);
+    });
+
+    it('extracts regular expressions', async () => {
+      await assertQueryExport('interpolate(alias(servers.eas*.{001,002}.request.POST.200,1,2))', [
+        { name: 'cluster', operator: AbstractLabelOperator.EqualRegEx, value: '^eas.*' },
+        { name: 'server', operator: AbstractLabelOperator.EqualRegEx, value: '^(001|002)' },
+      ]);
+    });
+
+    it('does not extract metrics when the config does not match', async () => {
+      await assertQueryExport('interpolate(alias(test.west.001.cpu))', []);
+      await assertQueryExport('interpolate(alias(servers.west.001))', []);
     });
   });
 });
 
-function accessScenario(name: string, url: string, fn: any) {
+function accessScenario(name: string, url: string, fn: ({ headers }: { headers: Record<string, unknown> }) => void) {
   describe('access scenario ' + name, () => {
-    const ctx: any = {
-      // @ts-ignore
+    const ctx = {
       templateSrv: new TemplateSrv(),
       instanceSettings: { url: 'url', name: 'graphiteProd', jsonData: {} },
     };
 
     const httpOptions = {
       headers: {},
+      url,
     };
 
     describe('when using proxy mode', () => {
@@ -550,12 +895,12 @@ function accessScenario(name: string, url: string, fn: any) {
   });
 }
 
-accessScenario('with proxy access', '/api/datasources/proxy/1', (httpOptions: any) => {
+accessScenario('with proxy access', '/api/datasources/proxy/1', (httpOptions) => {
   expect(httpOptions.headers['X-Dashboard-Id']).toBe(1);
   expect(httpOptions.headers['X-Panel-Id']).toBe(2);
 });
 
-accessScenario('with direct access', 'http://localhost:8080', (httpOptions: any) => {
+accessScenario('with direct access', 'http://localhost:8080', (httpOptions) => {
   expect(httpOptions.headers['X-Dashboard-Id']).toBe(undefined);
   expect(httpOptions.headers['X-Panel-Id']).toBe(undefined);
 });

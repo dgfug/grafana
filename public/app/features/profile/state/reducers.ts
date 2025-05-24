@@ -1,14 +1,16 @@
-import { isEmpty, isString, set } from 'lodash';
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { dateTimeFormat, dateTimeFormatTimeAgo, TimeZone } from '@grafana/data';
+import { isEmpty, isString, set } from 'lodash';
 
-import { Team, ThunkResult, UserDTO, UserOrg, UserSession } from 'app/types';
+import { dateTimeFormatTimeAgo, setWeekStart, TimeZone } from '@grafana/data';
+import { getWeekStart, WeekStart } from '@grafana/ui';
 import config from 'app/core/config';
 import { contextSrv } from 'app/core/core';
+import { Team, ThunkResult, UserDTO, UserOrg, UserSession } from 'app/types';
 
 export interface UserState {
   orgId: number;
   timeZone: TimeZone;
+  weekStart: string;
   fiscalYearStartMonth: number;
   user: UserDTO | null;
   teams: Team[];
@@ -23,6 +25,7 @@ export interface UserState {
 export const initialUserState: UserState = {
   orgId: config.bootData.user.orgId,
   timeZone: config.bootData.user.timezone,
+  weekStart: config.bootData.user.weekStart,
   fiscalYearStartMonth: 0,
   orgsAreLoading: false,
   sessionsAreLoading: false,
@@ -40,6 +43,9 @@ export const slice = createSlice({
   reducers: {
     updateTimeZone: (state, action: PayloadAction<{ timeZone: TimeZone }>) => {
       state.timeZone = action.payload.timeZone;
+    },
+    updateWeekStart: (state, action: PayloadAction<{ weekStart: string }>) => {
+      state.weekStart = action.payload.weekStart;
     },
     updateFiscalYearStartMonth: (state, action: PayloadAction<{ fiscalYearStartMonth: number }>) => {
       state.fiscalYearStartMonth = action.payload.fiscalYearStartMonth;
@@ -73,10 +79,11 @@ export const slice = createSlice({
         id: session.id,
         isActive: session.isActive,
         seenAt: dateTimeFormatTimeAgo(session.seenAt),
-        createdAt: dateTimeFormat(session.createdAt, { format: 'MMMM DD, YYYY' }),
+        createdAt: session.createdAt,
         clientIp: session.clientIp,
         browser: session.browser,
         browserVersion: session.browserVersion,
+        authModule: session.authModule,
         os: session.os,
         osVersion: session.osVersion,
         device: session.device,
@@ -110,6 +117,18 @@ export const updateTimeZoneForSession = (timeZone: TimeZone): ThunkResult<void> 
   };
 };
 
+export const updateWeekStartForSession = (weekStart?: WeekStart): ThunkResult<void> => {
+  return async (dispatch) => {
+    if (!weekStart) {
+      weekStart = getWeekStart();
+    }
+
+    set(contextSrv, 'user.weekStart', weekStart);
+    dispatch(updateWeekStart({ weekStart }));
+    setWeekStart(weekStart);
+  };
+};
+
 export const {
   setUpdating,
   initLoadOrgs,
@@ -121,6 +140,7 @@ export const {
   initLoadSessions,
   sessionsLoaded,
   updateTimeZone,
+  updateWeekStart,
   updateFiscalYearStartMonth,
 } = slice.actions;
 

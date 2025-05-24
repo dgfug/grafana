@@ -1,38 +1,39 @@
-import React, { FC, HTMLAttributes } from 'react';
-import { css, cx } from '@emotion/css';
-import { IconSize, useStyles, Icon } from '@grafana/ui';
+import { HTMLAttributes } from 'react';
+
+import { Button, IconSize } from '@grafana/ui';
 
 interface Props extends HTMLAttributes<HTMLButtonElement> {
   isCollapsed: boolean;
   onToggle: (isCollapsed: boolean) => void;
+  // Todo: this should be made compulsory for a11y purposes
+  idControlled?: string;
   size?: IconSize;
   className?: string;
   text?: string;
 }
 
-export const CollapseToggle: FC<Props> = ({ isCollapsed, onToggle, className, text, size = 'xl', ...restOfProps }) => {
-  const styles = useStyles(getStyles);
-
+export const CollapseToggle = ({
+  isCollapsed,
+  onToggle,
+  idControlled,
+  className,
+  text,
+  size = 'xl',
+  ...restOfProps
+}: Props) => {
   return (
-    <button className={cx(styles.expandButton, className)} onClick={() => onToggle(!isCollapsed)} {...restOfProps}>
-      <Icon size={size} name={isCollapsed ? 'angle-right' : 'angle-down'} />
+    <Button
+      type="button"
+      fill="text"
+      variant="secondary"
+      aria-expanded={!isCollapsed}
+      aria-controls={idControlled}
+      className={className}
+      icon={isCollapsed ? 'angle-right' : 'angle-down'}
+      onClick={() => onToggle(!isCollapsed)}
+      {...restOfProps}
+    >
       {text}
-    </button>
+    </Button>
   );
 };
-
-export const getStyles = () => ({
-  expandButton: css`
-    background: none;
-    border: none;
-
-    outline: none !important;
-
-    display: inline-flex;
-    align-items: center;
-
-    svg {
-      margin-bottom: 0;
-    }
-  `,
-});

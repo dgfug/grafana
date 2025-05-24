@@ -1,7 +1,8 @@
-import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { DataLinksContextMenu } from './DataLinksContextMenu';
+
 import { selectors } from '@grafana/e2e-selectors';
+
+import { DataLinksContextMenu } from './DataLinksContextMenu';
 
 const fakeAriaLabel = 'fake aria label';
 describe('DataLinksContextMenu', () => {
@@ -22,18 +23,6 @@ describe('DataLinksContextMenu', () => {
             origin: {},
           },
         ]}
-        config={{
-          links: [
-            {
-              title: 'Link1',
-              url: '/link1',
-            },
-            {
-              title: 'Link2',
-              url: '/link2',
-            },
-          ],
-        }}
       >
         {() => {
           return <div aria-label="fake aria label" />;
@@ -56,14 +45,6 @@ describe('DataLinksContextMenu', () => {
             origin: {},
           },
         ]}
-        config={{
-          links: [
-            {
-              title: 'Link1',
-              url: '/link1',
-            },
-          ],
-        }}
       >
         {() => {
           return <div aria-label="fake aria label" />;
@@ -72,6 +53,6 @@ describe('DataLinksContextMenu', () => {
     );
 
     expect(screen.getByLabelText(fakeAriaLabel)).toBeInTheDocument();
-    expect(screen.getByLabelText(selectors.components.DataLinksContextMenu.singleLink)).toBeInTheDocument();
+    expect(screen.getByTestId(selectors.components.DataLinksContextMenu.singleLink)).toBeInTheDocument();
   });
 });

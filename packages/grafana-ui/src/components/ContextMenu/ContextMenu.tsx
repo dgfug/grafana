@@ -1,8 +1,11 @@
-import React, { useRef, useState, useLayoutEffect } from 'react';
-import { selectors } from '@grafana/e2e-selectors';
+import { useRef, useState, useLayoutEffect } from 'react';
+import * as React from 'react';
 import { useClickAway } from 'react-use';
-import { Portal } from '../Portal/Portal';
+
+import { selectors } from '@grafana/e2e-selectors';
+
 import { Menu } from '../Menu/Menu';
+import { Portal } from '../Portal/Portal';
 
 export interface ContextMenuProps {
   /** Starting horizontal position for the menu */
@@ -11,14 +14,16 @@ export interface ContextMenuProps {
   y: number;
   /** Callback for closing the menu */
   onClose?: () => void;
+  /** On menu open focus the first element */
+  focusOnOpen?: boolean;
   /** RenderProp function that returns menu items to display */
   renderMenuItems?: () => React.ReactNode;
   /** A function that returns header element */
   renderHeader?: () => React.ReactNode;
 }
 
-export const ContextMenu: React.FC<ContextMenuProps> = React.memo(
-  ({ x, y, onClose, renderMenuItems, renderHeader }) => {
+export const ContextMenu = React.memo(
+  ({ x, y, onClose, focusOnOpen = true, renderMenuItems, renderHeader }: ContextMenuProps) => {
     const menuRef = useRef<HTMLDivElement>(null);
     const [positionStyles, setPositionStyles] = useState({});
 
@@ -29,13 +34,13 @@ export const ContextMenu: React.FC<ContextMenuProps> = React.memo(
         const OFFSET = 5;
         const collisions = {
           right: window.innerWidth < x + rect.width,
-          bottom: window.innerHeight < rect.bottom + rect.height + OFFSET,
+          bottom: window.innerHeight < y + rect.height + OFFSET,
         };
 
         setPositionStyles({
           position: 'fixed',
           left: collisions.right ? x - rect.width - OFFSET : x - OFFSET,
-          top: collisions.bottom ? y - rect.height - OFFSET : y + OFFSET,
+          top: Math.max(0, collisions.bottom ? y - rect.height - OFFSET : y + OFFSET),
         });
       }
     }, [x, y]);
@@ -46,7 +51,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = React.memo(
     const header = renderHeader?.();
     const menuItems = renderMenuItems?.();
     const onOpen = (setFocusedItem: (a: number) => void) => {
-      setFocusedItem(0);
+      if (focusOnOpen) {
+        setFocusedItem(0);
+      }
     };
     const onKeyDown = (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {

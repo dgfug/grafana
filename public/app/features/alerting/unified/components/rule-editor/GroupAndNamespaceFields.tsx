@@ -1,19 +1,20 @@
-import React, { FC, useEffect, useMemo, useState } from 'react';
-import { useDispatch } from 'react-redux';
-import { useUnifiedAlertingSelector } from '../../hooks/useUnifiedAlertingSelector';
-import { fetchRulerRulesAction } from '../../state/actions';
-import { RuleFormValues } from '../../types/rule-form';
-import { useFormContext } from 'react-hook-form';
-import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { SelectWithAdd } from './SelectWIthAdd';
-import { Field, InputControl, useStyles2 } from '@grafana/ui';
 import { css } from '@emotion/css';
+import { useMemo } from 'react';
+import { Controller, useFormContext } from 'react-hook-form';
+
+import { GrafanaTheme2, SelectableValue } from '@grafana/data';
+import { useTranslate } from '@grafana/i18n';
+import { Field, VirtualizedSelect, useStyles2 } from '@grafana/ui';
+
+import { RuleFormValues } from '../../types/rule-form';
+
+import { useGetNameSpacesByDatasourceName } from './useAlertRuleSuggestions';
 
 interface Props {
-  dataSourceName: string;
+  rulesSourceName: string;
 }
 
-export const GroupAndNamespaceFields: FC<Props> = ({ dataSourceName }) => {
+export const GroupAndNamespaceFields = ({ rulesSourceName }: Props) => {
   const {
     control,
     watch,
@@ -22,53 +23,51 @@ export const GroupAndNamespaceFields: FC<Props> = ({ dataSourceName }) => {
   } = useFormContext<RuleFormValues>();
 
   const style = useStyles2(getStyle);
-
-  const [customGroup, setCustomGroup] = useState(false);
-
-  const rulerRequests = useUnifiedAlertingSelector((state) => state.rulerRules);
-  const dispatch = useDispatch();
-  useEffect(() => {
-    dispatch(fetchRulerRulesAction(dataSourceName));
-  }, [dataSourceName, dispatch]);
-
-  const rulesConfig = rulerRequests[dataSourceName]?.result;
+  const { namespaceGroups, isLoading } = useGetNameSpacesByDatasourceName(rulesSourceName);
 
   const namespace = watch('namespace');
 
-  const namespaceOptions = useMemo(
-    (): Array<SelectableValue<string>> =>
-      rulesConfig ? Object.keys(rulesConfig).map((namespace) => ({ label: namespace, value: namespace })) : [],
-    [rulesConfig]
+  const namespaceOptions: Array<SelectableValue<string>> = useMemo(
+    () =>
+      Array.from(namespaceGroups.keys()).map((namespace) => ({
+        label: namespace,
+        value: namespace,
+      })),
+    [namespaceGroups]
   );
 
-  const groupOptions = useMemo(
-    (): Array<SelectableValue<string>> =>
-      (namespace && rulesConfig?.[namespace]?.map((group) => ({ label: group.name, value: group.name }))) || [],
-    [namespace, rulesConfig]
+  const groupOptions: Array<SelectableValue<string>> = useMemo(
+    () => (namespace && namespaceGroups.get(namespace)?.map((group) => ({ label: group, value: group }))) || [],
+    [namespace, namespaceGroups]
   );
+  const { t } = useTranslate();
 
   return (
     <div className={style.flexRow}>
       <Field
         data-testid="namespace-picker"
-        label="Namespace"
+        label={t('alerting.group-and-namespace-fields.namespace-picker-label-namespace', 'Namespace')}
+        // Disable translations as we don't intend to use this dropdown longterm,
+        // so avoiding us adding translations for the sake of it
+        // eslint-disable-next-line @grafana/no-untranslated-strings
+        description="Type to search for an existing namespace or create a new one"
         error={errors.namespace?.message}
         invalid={!!errors.namespace?.message}
       >
-        <InputControl
+        <Controller
           render={({ field: { onChange, ref, ...field } }) => (
-            <SelectWithAdd
+            <VirtualizedSelect
               {...field}
+              allowCustomValue
               className={style.input}
               onChange={(value) => {
                 setValue('group', ''); //reset if namespace changes
-                onChange(value);
-              }}
-              onCustomChange={(custom: boolean) => {
-                custom && setCustomGroup(true);
+                onChange(value.value);
               }}
               options={namespaceOptions}
               width={42}
+              isLoading={isLoading}
+              disabled={isLoading}
             />
           )}
           name="namespace"
@@ -78,10 +77,30 @@ export const GroupAndNamespaceFields: FC<Props> = ({ dataSourceName }) => {
           }}
         />
       </Field>
-      <Field data-testid="group-picker" label="Group" error={errors.group?.message} invalid={!!errors.group?.message}>
-        <InputControl
+      <Field
+        data-testid="group-picker"
+        label={t('alerting.group-and-namespace-fields.group-picker-label-group', 'Group')}
+        // Disable translations as we don't intend to use this dropdown longterm,
+        // so avoiding us adding translations for the sake of it
+        // eslint-disable-next-line @grafana/no-untranslated-strings
+        description="Type to search for an existing group or create a new one"
+        error={errors.group?.message}
+        invalid={!!errors.group?.message}
+      >
+        <Controller
           render={({ field: { ref, ...field } }) => (
-            <SelectWithAdd {...field} options={groupOptions} width={42} custom={customGroup} className={style.input} />
+            <VirtualizedSelect
+              {...field}
+              allowCustomValue
+              options={groupOptions}
+              width={42}
+              onChange={(value) => {
+                setValue('group', value.value ?? '');
+              }}
+              className={style.input}
+              isLoading={isLoading}
+              disabled={isLoading}
+            />
           )}
           name="group"
           control={control}
@@ -95,16 +114,16 @@ export const GroupAndNamespaceFields: FC<Props> = ({ dataSourceName }) => {
 };
 
 const getStyle = (theme: GrafanaTheme2) => ({
-  flexRow: css`
-    display: flex;
-    flex-direction: row;
-    justify-content: flex-start;
+  flexRow: css({
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
 
-    & > * + * {
-      margin-left: ${theme.spacing(3)};
-    }
-  `,
-  input: css`
-    width: 330px !important;
-  `,
+    '& > * + *': {
+      marginLeft: theme.spacing(3),
+    },
+  }),
+  input: css({
+    width: '330px !important',
+  }),
 });

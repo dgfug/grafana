@@ -1,23 +1,23 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
+import { Subscription } from 'rxjs';
+
 import {
   EventBus,
   LegacyGraphHoverEvent,
   LegacyGraphHoverClearEvent,
   DataHoverEvent,
   DataHoverClearEvent,
-  DataHoverPayload,
-  BusEventWithPayload,
+  BusEventBase,
 } from '@grafana/data';
-import { Subscription } from 'rxjs';
 import { CustomScrollbar } from '@grafana/ui';
-import { DataHoverView } from '../geomap/components/DataHoverView';
+import { DataHoverView } from 'app/features/visualization/data-hover/DataHoverView';
 
 interface Props {
   eventBus: EventBus;
 }
 
 interface State {
-  event?: BusEventWithPayload<DataHoverPayload>;
+  event?: BusEventBase;
 }
 export class CursorView extends Component<Props, State> {
   subscription = new Subscription();
@@ -65,9 +65,13 @@ export class CursorView extends Component<Props, State> {
       <CustomScrollbar autoHeightMin="100%" autoHeightMax="100%">
         <h3>Origin: {(origin as any)?.path}</h3>
         <span>Type: {type}</span>
-        <pre>{JSON.stringify(payload.point, null, '  ')}</pre>
-        {payload.data && (
-          <DataHoverView data={payload.data} rowIndex={payload.rowIndex} columnIndex={payload.columnIndex} />
+        {Boolean(payload) && (
+          <>
+            <pre>{JSON.stringify(payload.point, null, '  ')}</pre>
+            {payload.data && (
+              <DataHoverView data={payload.data} rowIndex={payload.rowIndex} columnIndex={payload.columnIndex} />
+            )}
+          </>
         )}
       </CustomScrollbar>
     );

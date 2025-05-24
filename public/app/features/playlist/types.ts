@@ -1,27 +1,14 @@
-export interface PlaylistDTO {
-  id: number;
-  name: string;
-  startUrl?: string;
-}
+import { Playlist } from '../../api/clients/playlist';
+import { DashboardQueryResult } from '../search/service/types';
+export type PlaylistMode = boolean;
 
-export interface PlayListItemDTO {
-  id: number;
-  title: string;
-  playlistid: string;
-  type: 'dashboard' | 'tag';
-}
+type PlaylistItem = Playlist['spec']['items'][number];
 
-export interface Playlist {
-  name: string;
-  interval: string;
-  items?: PlaylistItem[];
-}
-
-export interface PlaylistItem {
-  id?: number;
-  value: string; //tag or id.toString()
-  type: 'dashboard_by_id' | 'dashboard_by_tag';
-  order: number;
-  title: string;
-  playlistId?: number;
+export interface PlaylistItemUI extends PlaylistItem {
+  /**
+   * Loaded at runtime by the frontend.
+   *
+   * The values are not stored in the backend database.
+   */
+  dashboards?: DashboardQueryResult[];
 }

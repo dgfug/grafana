@@ -4,21 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/grafana/grafana/pkg/plugins/backendplugin/pluginextensionv2"
 )
 
-func (rs *RenderingService) startPlugin(ctx context.Context) error {
-	return rs.pluginInfo.Start(ctx)
-}
+func (rs *RenderingService) renderViaPlugin(ctx context.Context, renderType RenderType, renderKey string, opts Opts) (*RenderResult, error) {
+	logger := rs.log.FromContext(ctx)
 
-func (rs *RenderingService) renderViaPlugin(ctx context.Context, renderKey string, opts Opts) (*RenderResult, error) {
 	// gives plugin some additional time to timeout and return possible errors.
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Second*2)
+	ctx, cancel := context.WithTimeout(ctx, getRequestTimeout(opts.TimeoutOpts))
 	defer cancel()
 
-	filePath, err := rs.getNewFilePath(RenderPNG)
+	filePath, err := rs.getNewFilePath(renderType)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +29,7 @@ func (rs *RenderingService) renderViaPlugin(ctx context.Context, renderKey strin
 	}
 
 	req := &pluginextensionv2.RenderRequest{
-		Url:               rs.getURL(opts.Path),
+		Url:               rs.getGrafanaCallbackURL(opts.Path),
 		Width:             int32(opts.Width),
 		Height:            int32(opts.Height),
 		DeviceScaleFactor: float32(opts.DeviceScaleFactor),
@@ -42,12 +39,18 @@ func (rs *RenderingService) renderViaPlugin(ctx context.Context, renderKey strin
 		Timezone:          isoTimeOffsetToPosixTz(opts.Timezone),
 		Domain:            rs.domain,
 		Headers:           headers,
+		AuthToken:         rs.Cfg.RendererAuthToken,
+		Encoding:          string(renderType),
 	}
-	rs.log.Debug("Calling renderer plugin", "req", req)
+	logger.Debug("Calling renderer plugin", "req", req)
 
-	rsp, err := rs.pluginInfo.GrpcPluginV2.Render(ctx, req)
+	rc, err := rs.plugin.Client()
+	if err != nil {
+		return nil, err
+	}
+	rsp, err := rc.Render(ctx, req)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		rs.log.Info("Rendering timed out")
+		logger.Error("Rendering timed out")
 		return nil, ErrTimeout
 	}
 	if err != nil {
@@ -61,8 +64,10 @@ func (rs *RenderingService) renderViaPlugin(ctx context.Context, renderKey strin
 }
 
 func (rs *RenderingService) renderCSVViaPlugin(ctx context.Context, renderKey string, opts CSVOpts) (*RenderCSVResult, error) {
+	logger := rs.log.FromContext(ctx)
+
 	// gives plugin some additional time to timeout and return possible errors.
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Second*2)
+	ctx, cancel := context.WithTimeout(ctx, getRequestTimeout(opts.TimeoutOpts))
 	defer cancel()
 
 	filePath, err := rs.getNewFilePath(RenderCSV)
@@ -78,20 +83,26 @@ func (rs *RenderingService) renderCSVViaPlugin(ctx context.Context, renderKey st
 	}
 
 	req := &pluginextensionv2.RenderCSVRequest{
-		Url:       rs.getURL(opts.Path),
+		Url:       rs.getGrafanaCallbackURL(opts.Path),
 		FilePath:  filePath,
 		RenderKey: renderKey,
 		Domain:    rs.domain,
 		Timeout:   int32(opts.Timeout.Seconds()),
 		Timezone:  isoTimeOffsetToPosixTz(opts.Timezone),
 		Headers:   headers,
+		AuthToken: rs.Cfg.RendererAuthToken,
 	}
-	rs.log.Debug("Calling renderer plugin", "req", req)
+	logger.Debug("Calling renderer plugin", "req", req)
 
-	rsp, err := rs.pluginInfo.GrpcPluginV2.RenderCSV(ctx, req)
+	rc, err := rs.plugin.Client()
+	if err != nil {
+		return nil, err
+	}
+
+	rsp, err := rc.RenderCSV(ctx, req)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			rs.log.Info("Rendering timed out")
+			logger.Error("Rendering timed out")
 			return nil, ErrTimeout
 		}
 

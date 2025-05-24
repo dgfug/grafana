@@ -1,39 +1,66 @@
-import React from 'react';
-import { Button, Field, Input } from '@grafana/ui';
+import * as React from 'react';
+import { DeepMap, FieldError, FieldErrors, useFormContext } from 'react-hook-form';
+
+import { Field, SecretInput } from '@grafana/ui';
+import { NotificationChannelOption, NotificationChannelSecureFields, OptionMeta } from 'app/types';
+
+import {
+  ChannelValues,
+  CloudChannelValues,
+  GrafanaChannelValues,
+  ReceiverFormValues,
+} from '../../../types/receiver-form';
+
 import { OptionField } from './fields/OptionField';
-import { ChannelValues, ReceiverFormValues } from '../../../types/receiver-form';
-import { useFormContext, FieldError, FieldErrors, DeepMap } from 'react-hook-form';
-import { NotificationChannelOption, NotificationChannelSecureFields } from 'app/types';
 
 export interface Props<R extends ChannelValues> {
   defaultValues: R;
   selectedChannelOptions: NotificationChannelOption[];
-  secureFields: NotificationChannelSecureFields;
 
   onResetSecureField: (key: string) => void;
+  onDeleteSubform?: (propertyName: string) => void;
   errors?: FieldErrors<R>;
-  pathPrefix?: string;
+  /**
+   * The path for the integration in the array of integrations.
+   * This is used to access the settings and secure fields for the integration in a type-safe way.
+   */
+  integrationPrefix: `items.${number}`;
   readOnly?: boolean;
+
+  customValidators?: Record<string, React.ComponentProps<typeof OptionField>['customValidator']>;
 }
 
 export function ChannelOptions<R extends ChannelValues>({
   defaultValues,
   selectedChannelOptions,
   onResetSecureField,
-  secureFields,
+  onDeleteSubform,
   errors,
-  pathPrefix = '',
+  integrationPrefix,
   readOnly = false,
+  customValidators = {},
 }: Props<R>): JSX.Element {
-  const { watch } = useFormContext<ReceiverFormValues<R>>();
-  const currentFormValues = watch() as Record<string, any>; // react hook form types ARE LYING!
+  const { watch } = useFormContext<ReceiverFormValues<CloudChannelValues | GrafanaChannelValues>>();
+
+  const [settings, secureFields] = watch([`${integrationPrefix}.settings`, `${integrationPrefix}.secureFields`]);
+
+  // Note: settingsPath includes a trailing dot for OptionField, unlike the path used in watch()
+  const settingsPath = `${integrationPrefix}.settings.` as const;
+
+  const getOptionMeta = (option: NotificationChannelOption): OptionMeta => ({
+    required: determineRequired(option, settings, secureFields),
+    readOnly: determineReadOnly(option, settings, secureFields),
+  });
+
   return (
     <>
       {selectedChannelOptions.map((option: NotificationChannelOption, index: number) => {
         const key = `${option.label}-${index}`;
         // Some options can be dependent on other options, this determines what is selected in the dependency options
         // I think this needs more thought.
-        const selectedOptionValue = currentFormValues[`${pathPrefix}settings.${option.showWhen.field}`];
+        // pathPrefix = items.index.
+        // const paths = pathPrefix.split('.');
+        const selectedOptionValue = settings?.[option.showWhen.field];
 
         if (option.showWhen.field && selectedOptionValue !== option.showWhen.is) {
           return null;
@@ -41,44 +68,77 @@ export function ChannelOptions<R extends ChannelValues>({
 
         if (secureFields && secureFields[option.propertyName]) {
           return (
-            <Field key={key} label={option.label} description={option.description || undefined}>
-              <Input
-                readOnly={true}
-                value="Configured"
-                suffix={
-                  readOnly ? null : (
-                    <Button
-                      onClick={() => onResetSecureField(option.propertyName)}
-                      variant="link"
-                      type="button"
-                      size="sm"
-                    >
-                      Clear
-                    </Button>
-                  )
-                }
+            <Field
+              key={key}
+              label={option.label}
+              description={option.description}
+              htmlFor={`${settingsPath}${option.propertyName}`}
+            >
+              <SecretInput
+                id={`${settingsPath}${option.propertyName}`}
+                onReset={() => onResetSecureField(option.propertyName)}
+                isConfigured
               />
             </Field>
           );
         }
 
-        const error: FieldError | DeepMap<any, FieldError> | undefined = ((option.secure
-          ? errors?.secureSettings
-          : errors?.settings) as DeepMap<any, FieldError> | undefined)?.[option.propertyName];
+        const error: FieldError | DeepMap<any, FieldError> | undefined = (
+          (option.secure ? errors?.secureFields : errors?.settings) as DeepMap<any, FieldError> | undefined
+        )?.[option.propertyName];
 
         const defaultValue = defaultValues?.settings?.[option.propertyName];
 
         return (
           <OptionField
+            secureFields={secureFields}
+            onResetSecureField={onResetSecureField}
+            onDeleteSubform={onDeleteSubform}
             defaultValue={defaultValue}
             readOnly={readOnly}
             key={key}
             error={error}
-            pathPrefix={option.secure ? `${pathPrefix}secureSettings.` : `${pathPrefix}settings.`}
+            pathPrefix={settingsPath}
             option={option}
+            customValidator={customValidators[option.propertyName]}
+            getOptionMeta={getOptionMeta}
           />
         );
       })}
     </>
   );
 }
+
+const determineRequired = (
+  option: NotificationChannelOption,
+  settings: Record<string, unknown>,
+  secureFields: NotificationChannelSecureFields
+) => {
+  if (!option.required) {
+    return false;
+  }
+
+  if (!option.dependsOn) {
+    return option.required ? 'Required' : false;
+  }
+
+  const dependentOn = Boolean(settings[option.dependsOn]) || Boolean(secureFields[option.dependsOn]);
+
+  if (dependentOn) {
+    return false;
+  }
+
+  return 'Required';
+};
+
+const determineReadOnly = (
+  option: NotificationChannelOption,
+  settings: Record<string, unknown>,
+  secureFields: NotificationChannelSecureFields
+) => {
+  if (!option.dependsOn) {
+    return false;
+  }
+
+  return Boolean(settings[option.dependsOn]) || Boolean(secureFields[option.dependsOn]);
+};

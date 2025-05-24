@@ -1,84 +1,109 @@
-import React, { FC } from 'react';
-import { config } from '@grafana/runtime';
-import { Button, Field, Form, HorizontalGroup, Input, LinkButton } from '@grafana/ui';
+import { useMemo, useState } from 'react';
+
 import { selectors } from '@grafana/e2e-selectors';
+import { Trans, useTranslate } from '@grafana/i18n';
+import { config } from '@grafana/runtime';
+import { Button, Field, FieldSet, Input, LinkButton, Stack } from '@grafana/ui';
+import { Form } from 'app/core/components/Form/Form';
+import { DashboardPicker } from 'app/core/components/Select/DashboardPicker';
+import { TagFilter } from 'app/core/components/TagFilter/TagFilter';
 
-import { Playlist } from './types';
-import { TagFilter } from '../../core/components/TagFilter/TagFilter';
-import { SearchSrv } from '../../core/services/search_srv';
-import { usePlaylistItems } from './usePlaylistItems';
+import { Playlist } from '../../api/clients/playlist';
+import { getGrafanaSearcher } from '../search/service/searcher';
+
 import { PlaylistTable } from './PlaylistTable';
-import { DashboardPickerByID } from 'app/core/components/editors/DashboardPickerByID';
+import { usePlaylistItems } from './usePlaylistItems';
 
-interface PlaylistFormProps {
+interface Props {
   onSubmit: (playlist: Playlist) => void;
   playlist: Playlist;
 }
 
-const searchSrv = new SearchSrv();
+export const PlaylistForm = ({ onSubmit, playlist }: Props) => {
+  const [saving, setSaving] = useState(false);
+  const { title: name, interval, items: propItems } = playlist.spec;
+  const tagOptions = useMemo(() => {
+    return () => getGrafanaSearcher().tags({ kind: ['dashboard'] });
+  }, []);
 
-export const PlaylistForm: FC<PlaylistFormProps> = ({ onSubmit, playlist }) => {
-  const { name, interval, items: propItems } = playlist;
-  const { items, addById, addByTag, deleteItem, moveDown, moveUp } = usePlaylistItems(propItems);
+  const { items, addByUID, addByTag, deleteItem, moveItem } = usePlaylistItems(propItems);
+  const { t } = useTranslate();
+  const doSubmit = (specUpdates: Playlist['spec']) => {
+    setSaving(true);
+    onSubmit({
+      ...playlist,
+      spec: {
+        ...specUpdates,
+        items,
+      },
+    });
+  };
+
   return (
-    <>
-      <Form onSubmit={(list: Playlist) => onSubmit({ ...list, items })} validateOn={'onBlur'}>
-        {({ register, errors }) => {
-          const isDisabled = items.length === 0 || Object.keys(errors).length > 0;
-          return (
-            <>
-              <Field label="Name" invalid={!!errors.name} error={errors?.name?.message}>
-                <Input
-                  type="text"
-                  {...register('name', { required: 'Name is required' })}
-                  placeholder="Name"
-                  defaultValue={name}
-                  aria-label={selectors.pages.PlaylistForm.name}
+    <Form onSubmit={doSubmit} validateOn={'onBlur'}>
+      {({ register, errors }) => {
+        const isDisabled = items.length === 0 || Object.keys(errors).length > 0;
+        return (
+          <>
+            <Field
+              label={t('playlist-edit.form.name-label', 'Name')}
+              invalid={!!errors.title}
+              error={errors?.title?.message}
+            >
+              <Input
+                type="text"
+                {...register('title', { required: t('playlist-edit.form.name-required', 'Name is required') })}
+                placeholder={t('playlist-edit.form.name-placeholder', 'Name')}
+                defaultValue={name}
+                aria-label={selectors.pages.PlaylistForm.name}
+              />
+            </Field>
+            <Field
+              label={t('playlist-edit.form.interval-label', 'Interval')}
+              invalid={!!errors.interval}
+              error={errors?.interval?.message}
+            >
+              <Input
+                type="text"
+                {...register('interval', {
+                  required: t('playlist-edit.form.interval-required', 'Interval is required'),
+                })}
+                placeholder={t('playlist-edit.form.interval-placeholder', '5m')}
+                defaultValue={interval ?? '5m'}
+                aria-label={selectors.pages.PlaylistForm.interval}
+              />
+            </Field>
+
+            <PlaylistTable items={items} deleteItem={deleteItem} moveItem={moveItem} />
+
+            <FieldSet label={t('playlist-edit.form.heading', 'Add dashboards')}>
+              <Field label={t('playlist-edit.form.add-title-label', 'Add by title')}>
+                <DashboardPicker id="dashboard-picker" onChange={addByUID} key={items.length} />
+              </Field>
+
+              <Field label={t('playlist-edit.form.add-tag-label', 'Add by tag')}>
+                <TagFilter
+                  isClearable
+                  tags={[]}
+                  hideValues
+                  tagOptions={tagOptions}
+                  onChange={addByTag}
+                  placeholder={t('playlist-edit.form.add-tag-placeholder', 'Select a tag')}
                 />
               </Field>
-              <Field label="Interval" invalid={!!errors.interval} error={errors?.interval?.message}>
-                <Input
-                  type="text"
-                  {...register('interval', { required: 'Interval is required' })}
-                  placeholder="5m"
-                  defaultValue={interval ?? '5m'}
-                  aria-label={selectors.pages.PlaylistForm.interval}
-                />
-              </Field>
+            </FieldSet>
 
-              <PlaylistTable items={items} onMoveUp={moveUp} onMoveDown={moveDown} onDelete={deleteItem} />
-
-              <div className="gf-form-group">
-                <h3 className="page-headering">Add dashboards</h3>
-
-                <Field label="Add by title">
-                  <DashboardPickerByID onChange={addById} isClearable />
-                </Field>
-
-                <Field label="Add by tag">
-                  <TagFilter
-                    isClearable
-                    tags={[]}
-                    hideValues
-                    tagOptions={searchSrv.getDashboardTags}
-                    onChange={addByTag}
-                    placeholder={''}
-                  />
-                </Field>
-              </div>
-
-              <HorizontalGroup>
-                <Button variant="primary" disabled={isDisabled}>
-                  Save
-                </Button>
-                <LinkButton variant="secondary" href={`${config.appSubUrl}/playlists`}>
-                  Cancel
-                </LinkButton>
-              </HorizontalGroup>
-            </>
-          );
-        }}
-      </Form>
-    </>
+            <Stack>
+              <Button type="submit" variant="primary" disabled={isDisabled} icon={saving ? 'spinner' : undefined}>
+                <Trans i18nKey="playlist-edit.form.save">Save</Trans>
+              </Button>
+              <LinkButton variant="secondary" href={`${config.appSubUrl}/playlists`}>
+                <Trans i18nKey="playlist-edit.form.cancel">Cancel</Trans>
+              </LinkButton>
+            </Stack>
+          </>
+        );
+      }}
+    </Form>
   );
 };

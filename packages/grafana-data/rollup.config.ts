@@ -1,42 +1,33 @@
-import resolve from '@rollup/plugin-node-resolve';
-import commonjs from '@rollup/plugin-commonjs';
-import sourceMaps from 'rollup-plugin-sourcemaps';
-import json from '@rollup/plugin-json';
-import { terser } from 'rollup-plugin-terser';
+import { createRequire } from 'node:module';
 
-const pkg = require('./package.json');
+import { entryPoint, plugins, esmOutput, cjsOutput, tsDeclarationOutput } from '../rollup.config.parts';
 
-const libraryName = pkg.name;
+const rq = createRequire(import.meta.url);
+const pkg = rq('./package.json');
 
-const buildCjsPackage = ({ env }) => {
-  return {
-    input: `compiled/index.js`,
+export default [
+  {
+    input: entryPoint,
+    plugins,
+    output: [cjsOutput(pkg), esmOutput(pkg, 'grafana-data')],
+  },
+  {
+    input: 'src/unstable.ts',
+    plugins,
+    output: [cjsOutput(pkg), esmOutput(pkg, 'grafana-data')],
+  },
+  tsDeclarationOutput(pkg),
+  tsDeclarationOutput(pkg, {
+    input: './compiled/unstable.d.ts',
     output: [
       {
-        file: `dist/index.${env}.js`,
-        name: libraryName,
+        file: './dist/cjs/unstable.d.cts',
         format: 'cjs',
-        sourcemap: true,
-        exports: 'named',
-        globals: {},
+      },
+      {
+        file: './dist/esm/unstable.d.mts',
+        format: 'es',
       },
     ],
-    external: [
-      'lodash',
-      'rxjs',
-      '@grafana/schema', // Load from host
-    ],
-    plugins: [
-      json({
-        include: ['../../node_modules/moment-timezone/data/packed/latest.json'],
-      }),
-      commonjs({
-        include: /node_modules/,
-      }),
-      resolve(),
-      sourceMaps(),
-      env === 'production' && terser(),
-    ],
-  };
-};
-export default [buildCjsPackage({ env: 'development' }), buildCjsPackage({ env: 'production' })];
+  }),
+];

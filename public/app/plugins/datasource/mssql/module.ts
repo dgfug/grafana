@@ -1,33 +1,16 @@
-import { MssqlDatasource } from './datasource';
-import { MssqlQueryCtrl } from './query_ctrl';
-import { MssqlConfigCtrl } from './config_ctrl';
-import { MssqlQuery } from './types';
 import { DataSourcePlugin } from '@grafana/data';
+import { initPluginTranslations } from '@grafana/i18n';
+import { SQLQuery, SqlQueryEditorLazy } from '@grafana/sql';
 
-const defaultQuery = `SELECT
-    <time_column> as time,
-    <text_column> as text,
-    <tags_column> as tags
-  FROM
-    <table name>
-  WHERE
-    $__timeFilter(time_column)
-  ORDER BY
-    <time_column> ASC`;
+import { CheatSheet } from './CheatSheet';
+import { ConfigurationEditor } from './configuration/ConfigurationEditor';
+import { MssqlDatasource } from './datasource';
+import pluginJson from './plugin.json';
+import { MssqlOptions } from './types';
 
-class MssqlAnnotationsQueryCtrl {
-  static templateUrl = 'partials/annotations.editor.html';
+initPluginTranslations(pluginJson.id);
 
-  declare annotation: any;
-
-  /** @ngInject */
-  constructor($scope: any) {
-    this.annotation = $scope.ctrl.annotation;
-    this.annotation.rawQuery = this.annotation.rawQuery || defaultQuery;
-  }
-}
-
-export const plugin = new DataSourcePlugin<MssqlDatasource, MssqlQuery>(MssqlDatasource)
-  .setQueryCtrl(MssqlQueryCtrl)
-  .setConfigCtrl(MssqlConfigCtrl)
-  .setAnnotationQueryCtrl(MssqlAnnotationsQueryCtrl);
+export const plugin = new DataSourcePlugin<MssqlDatasource, SQLQuery, MssqlOptions>(MssqlDatasource)
+  .setQueryEditor(SqlQueryEditorLazy)
+  .setQueryEditorHelp(CheatSheet)
+  .setConfigEditor(ConfigurationEditor);

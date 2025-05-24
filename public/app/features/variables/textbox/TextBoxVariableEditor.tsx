@@ -1,11 +1,12 @@
-import React, { FormEvent, ReactElement, useCallback } from 'react';
-import { VerticalGroup } from '@grafana/ui';
+import { FormEvent, ReactElement, useCallback } from 'react';
 
-import { TextBoxVariableModel } from '../types';
-import { VariableEditorProps } from '../editor/types';
-import { VariableSectionHeader } from '../editor/VariableSectionHeader';
-import { VariableTextField } from '../editor/VariableTextField';
+import { TextBoxVariableModel } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
+import { Trans, useTranslate } from '@grafana/i18n';
+
+import { VariableLegend } from '../../dashboard-scene/settings/variables/components/VariableLegend';
+import { VariableTextField } from '../../dashboard-scene/settings/variables/components/VariableTextField';
+import { VariableEditorProps } from '../editor/types';
 
 export interface Props extends VariableEditorProps<TextBoxVariableModel> {}
 
@@ -19,22 +20,25 @@ export function TextBoxVariableEditor({ onPropChange, variable: { query } }: Pro
     [onPropChange]
   );
 
+  const { t } = useTranslate();
+
   const onChange = useCallback((e: FormEvent<HTMLInputElement>) => updateVariable(e, false), [updateVariable]);
   const onBlur = useCallback((e: FormEvent<HTMLInputElement>) => updateVariable(e, true), [updateVariable]);
 
   return (
-    <VerticalGroup spacing="xs">
-      <VariableSectionHeader name="Text options" />
+    <>
+      <VariableLegend>
+        <Trans i18nKey="variables.text-box-variable-editor.text-options">Text options</Trans>
+      </VariableLegend>
       <VariableTextField
         value={query}
         name="Default value"
-        placeholder="default value, if any"
+        placeholder={t('variables.text-box-variable-editor.placeholder-default-value-if-any', 'default value, if any')}
         onChange={onChange}
         onBlur={onBlur}
-        labelWidth={20}
-        grow
-        ariaLabel={selectors.pages.Dashboard.Settings.Variables.Edit.TextBoxVariable.textBoxOptionsQueryInput}
+        width={30}
+        testId={selectors.pages.Dashboard.Settings.Variables.Edit.TextBoxVariable.textBoxOptionsQueryInputV2}
       />
-    </VerticalGroup>
+    </>
   );
 }

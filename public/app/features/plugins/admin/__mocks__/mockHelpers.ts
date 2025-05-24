@@ -1,17 +1,12 @@
 import { setBackendSrv } from '@grafana/runtime';
-import { API_ROOT, GRAFANA_API_ROOT } from '../constants';
-import {
-  CatalogPlugin,
-  LocalPlugin,
-  RemotePlugin,
-  Version,
-  ReducerState,
-  RequestStatus,
-  PluginListDisplayMode,
-} from '../types';
-import remotePluginMock from './remotePlugin.mock';
-import localPluginMock from './localPlugin.mock';
+
+import { API_ROOT, GCOM_API_ROOT } from '../constants';
+import * as permissions from '../permissions';
+import { CatalogPlugin, LocalPlugin, RemotePlugin, Version, ReducerState, RequestStatus } from '../types';
+
 import catalogPluginMock from './catalogPlugin.mock';
+import localPluginMock from './localPlugin.mock';
+import remotePluginMock from './remotePlugin.mock';
 
 // Returns a sample mock for a CatalogPlugin plugin with the possibility to extend it
 export const getCatalogPluginMock = (overrides?: Partial<CatalogPlugin>) => ({ ...catalogPluginMock, ...overrides });
@@ -36,9 +31,6 @@ export const getPluginsStateMock = (plugins: CatalogPlugin[] = []): ReducerState
     'plugins/fetchDetails': {
       status: RequestStatus.Fulfilled,
     },
-  },
-  settings: {
-    displayMode: PluginListDisplayMode.Grid,
   },
   // Backward compatibility
   plugins: [],
@@ -69,17 +61,17 @@ export const mockPluginApis = ({
     ...originalBackendSrv,
     get: (path: string) => {
       // Mock GCOM plugins (remote) if necessary
-      if (remote && path === `${GRAFANA_API_ROOT}/plugins`) {
+      if (remote && path === `${GCOM_API_ROOT}/plugins`) {
         return Promise.resolve({ items: [remote] });
       }
 
       // Mock GCOM single plugin page (remote) if necessary
-      if (remote && path === `${GRAFANA_API_ROOT}/plugins/${remote.slug}`) {
+      if (remote && path === `${GCOM_API_ROOT}/plugins/${remote.slug}`) {
         return Promise.resolve(remote);
       }
 
       // Mock versions
-      if (versions && path === `${GRAFANA_API_ROOT}/plugins/${remote.slug}/versions`) {
+      if (versions && path === `${GCOM_API_ROOT}/plugins/${remote.slug}/versions`) {
         return Promise.resolve({ items: versions });
       }
 
@@ -98,3 +90,18 @@ export const mockPluginApis = ({
     },
   });
 };
+
+type UserAccessTestContext = {
+  isAdmin: boolean;
+  isOrgAdmin: boolean;
+  isDataSourceEditor: boolean;
+};
+
+jest.mock('../permissions');
+
+export function mockUserPermissions(options: UserAccessTestContext): void {
+  const mock = jest.mocked(permissions);
+  mock.isDataSourceEditor.mockReturnValue(options.isDataSourceEditor);
+  mock.isOrgAdmin.mockReturnValue(options.isOrgAdmin);
+  mock.isGrafanaAdmin.mockReturnValue(options.isAdmin);
+}
